@@ -1,0 +1,43 @@
+motion:
+  probe_speed: 0.003
+  retract_speed: 0.008
+  search_speed: 0.002
+  move_speed: 0.01
+  max_linear_speed: 0.01
+  max_angular_speed: 0.05
+  max_linear_acceleration: 0.03
+  max_angular_acceleration: 0.15
+  twist_smoothing_alpha: 0.25
+  watchdog_timeout: 0.1
+  pose_servo_position_gain: 1.5
+  pose_servo_yaw_gain: 1.0
+  pose_servo_position_tolerance: 0.0015
+  pose_servo_yaw_tolerance: 0.03
+  pose_servo_target_timeout: 10.0
+  command_rate: 100.0
+
+contact:
+  baseline_window: 50
+  force_threshold_x: 4.0
+  force_threshold_y: 4.0
+  force_threshold_z: 4.0
+  torque_threshold: 0.2
+  wrench_timeout: 0.2
+
+probe:
+  retract_distance: 0.01
+  second_probe_y_offset: 0.02
+  max_probe_distance: 0.05
+  probe_timeout: 10.0
+
+search:
+  step_y: 0.0015
+  step_z: 0.0015
+  max_search_width: 0.01
+  max_search_height: 0.01
+  search_timeout: 20.0
+
+state_machine:
+  enabled: true
+  auto_zero_ft: true
+  log_debug: true

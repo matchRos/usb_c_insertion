@@ -1,0 +1,65 @@
+<launch>
+  <arg name="port_x" default="0.587" />
+  <arg name="port_y" default="-0.093" />
+  <arg name="port_z" default="0.018" />
+
+  <arg name="port_qx" default="0.000" />
+  <arg name="port_qy" default="0.000" />
+  <arg name="port_qz" default="-0.7071" />
+  <arg name="port_qw" default="0.7071" />
+
+  <arg name="auto_zero_ft" default="false" />
+  <arg name="stop_after_state" default="MOVE_TO_PREPOSE" />
+  <arg name="prepose_offset_port_x" default="-0.050" />
+  <arg name="prepose_offset_port_y" default="0.000" />
+  <arg name="prepose_offset_port_z" default="0.000" />
+  <arg name="prepose_speed" default="0.010" />
+  <arg name="prepose_timeout" default="30.0" />
+  <arg name="position_tolerance" default="0.002" />
+
+  <node pkg="usb_c_insertion"
+        type="twist_controller_node.py"
+        name="usb_c_insertion_twist_controller"
+        output="screen">
+    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+  </node>
+
+  <node pkg="usb_c_insertion"
+        type="pose_servo_node.py"
+        name="usb_c_insertion_pose_servo"
+        output="screen">
+    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+  </node>
+
+  <node pkg="usb_c_insertion"
+        type="insertion_state_machine.py"
+        name="usb_c_insertion_state_machine"
+        output="screen">
+    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+
+    <param name="state_machine/auto_zero_ft" value="$(arg auto_zero_ft)" />
+    <param name="state_machine/stop_after_state" value="$(arg stop_after_state)" />
+    <param name="state_machine/prepose_offset_port_x" value="$(arg prepose_offset_port_x)" />
+    <param name="state_machine/prepose_offset_port_y" value="$(arg prepose_offset_port_y)" />
+    <param name="state_machine/prepose_offset_port_z" value="$(arg prepose_offset_port_z)" />
+    <param name="state_machine/prepose_speed" value="$(arg prepose_speed)" />
+    <param name="state_machine/prepose_timeout" value="$(arg prepose_timeout)" />
+    <param name="state_machine/position_tolerance" value="$(arg position_tolerance)" />
+
+    <rosparam param="port_estimate" subst_value="true">
+      x: $(arg port_x)
+      y: $(arg port_y)
+      z: $(arg port_z)
+      qx: $(arg port_qx)
+      qy: $(arg port_qy)
+      qz: $(arg port_qz)
+      qw: $(arg port_qw)
+    </rosparam>
+  </node>
+</launch>

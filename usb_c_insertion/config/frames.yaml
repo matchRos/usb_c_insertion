@@ -1,0 +1,3 @@
+frames:
+  base_frame: "base_link"
+  tool_frame: "tool0"
