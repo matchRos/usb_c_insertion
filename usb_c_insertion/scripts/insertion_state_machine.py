@@ -543,6 +543,9 @@ class InsertionStateMachine:
             self._robot.stop_motion()
             return False
 
+        current_yaw = self._yaw_from_quaternion(current_pose.pose.orientation)
+        yaw_error = self._normalize_angle(target_yaw - current_yaw)
+
         target_orientation = self._apply_yaw_delta_to_quaternion(
             (
                 current_pose.pose.orientation.x,
