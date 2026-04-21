@@ -9,10 +9,13 @@
   <arg name="port_qw" default="0.7071" />
 
   <arg name="auto_zero_ft" default="false" />
-  <arg name="stop_after_state" default="ALIGN_TOOL_YAW" />
+  <arg name="stop_after_state" default="SEARCH_FOR_PORT" />
   <arg name="prepose_offset_port_x" default="-0.030" />
   <arg name="prepose_offset_port_y" default="0.000" />
   <arg name="prepose_offset_port_z" default="0.000" />
+  <arg name="precontact_offset_port_x" default="-0.010" />
+  <arg name="precontact_offset_port_y" default="0.000" />
+  <arg name="precontact_offset_port_z" default="0.000" />
   <arg name="prepose_speed" default="0.010" />
   <arg name="prepose_timeout" default="30.0" />
   <arg name="position_tolerance" default="0.002" />
@@ -48,6 +51,9 @@
     <param name="state_machine/prepose_offset_port_x" value="$(arg prepose_offset_port_x)" />
     <param name="state_machine/prepose_offset_port_y" value="$(arg prepose_offset_port_y)" />
     <param name="state_machine/prepose_offset_port_z" value="$(arg prepose_offset_port_z)" />
+    <param name="state_machine/precontact_offset_port_x" value="$(arg precontact_offset_port_x)" />
+    <param name="state_machine/precontact_offset_port_y" value="$(arg precontact_offset_port_y)" />
+    <param name="state_machine/precontact_offset_port_z" value="$(arg precontact_offset_port_z)" />
     <param name="state_machine/prepose_speed" value="$(arg prepose_speed)" />
     <param name="state_machine/prepose_timeout" value="$(arg prepose_timeout)" />
     <param name="state_machine/position_tolerance" value="$(arg position_tolerance)" />

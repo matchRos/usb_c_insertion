@@ -94,7 +94,9 @@ class InsertionStateMachine:
         self._prepose_offset_port_z = float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0))
         self._prepose_speed = float(rospy.get_param("~state_machine/prepose_speed", self._move_speed))
         self._prepose_timeout = float(rospy.get_param("~state_machine/prepose_timeout", 30.0))
-        self._precontact_offset_x = float(rospy.get_param("~state_machine/precontact_offset_x", -0.01))
+        self._precontact_offset_port_x = float(rospy.get_param("~state_machine/precontact_offset_port_x", -0.01))
+        self._precontact_offset_port_y = float(rospy.get_param("~state_machine/precontact_offset_port_y", 0.0))
+        self._precontact_offset_port_z = float(rospy.get_param("~state_machine/precontact_offset_port_z", 0.0))
         self._yaw_alignment_gain = float(rospy.get_param("~state_machine/yaw_alignment_gain", 0.8))
         self._yaw_tolerance = float(rospy.get_param("~state_machine/yaw_tolerance", 0.03))
         self._position_tolerance = float(rospy.get_param("~state_machine/position_tolerance", 0.002))
@@ -318,10 +320,15 @@ class InsertionStateMachine:
 
     def _handle_move_to_port_precontact(self) -> None:
         target_orientation = self._compute_tcp_target_orientation()
+        target_x, target_y, target_z = self._compute_port_frame_target(
+            self._precontact_offset_port_x,
+            self._precontact_offset_port_y,
+            self._precontact_offset_port_z,
+        )
         success = self._move_to_xyz(
-            self._port_x + self._precontact_offset_x,
-            self._port_y,
-            self._port_z,
+            target_x,
+            target_y,
+            target_z,
             speed=self._move_speed,
             timeout=8.0,
             move_name="move_to_port_precontact",
@@ -372,6 +379,23 @@ class InsertionStateMachine:
 
         wall_x = self._wall_estimate.wall_direction_x
         wall_y = self._wall_estimate.wall_direction_y
+        search_orientation = (
+            current_pose.pose.orientation.x,
+            current_pose.pose.orientation.y,
+            current_pose.pose.orientation.z,
+            current_pose.pose.orientation.w,
+        )
+        self._log(
+            "info",
+            "search_setup",
+            start_x=round(current_x, 4),
+            start_y=round(current_y, 4),
+            start_z=round(current_z, 4),
+            wall_dir_x=round(wall_x, 4),
+            wall_dir_y=round(wall_y, 4),
+            step_tangent=round(self._search_step_y, 4),
+            step_vertical=round(self._search_step_z, 4),
+        )
 
         for offset in pattern:
             if rospy.is_shutdown():
@@ -382,8 +406,8 @@ class InsertionStateMachine:
                 self._fail("search_timeout")
                 return
 
-            current_y += offset.dx * wall_x
-            current_x += offset.dx * wall_y * 0.0
+            current_x += offset.dx * wall_x
+            current_y += offset.dx * wall_y
             current_z += offset.dy
 
             if not self._move_to_xyz(
@@ -393,12 +417,7 @@ class InsertionStateMachine:
                 speed=self._search_speed,
                 timeout=4.0,
                 move_name="search_step",
-                target_orientation=(
-                    current_pose.pose.orientation.x,
-                    current_pose.pose.orientation.y,
-                    current_pose.pose.orientation.z,
-                    current_pose.pose.orientation.w,
-                ),
+                target_orientation=search_orientation,
             ):
                 self._fail("search_motion_failed")
                 return
