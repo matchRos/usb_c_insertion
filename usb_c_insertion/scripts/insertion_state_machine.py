@@ -188,9 +188,19 @@ class InsertionStateMachine:
         self._advance(InsertionState.PROBE_WALL_POINT_1)
 
     def _handle_probe_wall_point_1(self) -> None:
+        probe_direction = self._compute_port_frame_direction(1.0, 0.0, 0.0)
+        contact_axis = self._dominant_axis_name(probe_direction)
+        self._log(
+            "info",
+            "probe_wall_point_1_setup",
+            direction_x=round(probe_direction[0], 4),
+            direction_y=round(probe_direction[1], 4),
+            direction_z=round(probe_direction[2], 4),
+            contact_axis=contact_axis,
+        )
         self._probe_result_1 = self._wall_probe.probe_until_contact(
-            direction_xyz=(1.0, 0.0, 0.0),
-            axis_name="x",
+            direction_xyz=probe_direction,
+            axis_name=contact_axis,
             threshold=self._force_threshold_x,
             max_travel_distance=self._max_probe_distance,
             timeout=self._probe_timeout,
@@ -206,10 +216,12 @@ class InsertionStateMachine:
             self._fail("missing_tf_before_second_probe")
             return
 
+        second_probe_offset = self._compute_port_frame_direction(0.0, self._second_probe_y_offset, 0.0)
+
         success = self._move_to_xyz(
-            current_pose.pose.position.x,
-            current_pose.pose.position.y + self._second_probe_y_offset,
-            current_pose.pose.position.z,
+            current_pose.pose.position.x + second_probe_offset[0],
+            current_pose.pose.position.y + second_probe_offset[1],
+            current_pose.pose.position.z + second_probe_offset[2],
             speed=self._probe_speed,
             timeout=8.0,
             move_name="move_to_second_probe_offset",
@@ -218,9 +230,22 @@ class InsertionStateMachine:
             self._fail("move_to_second_probe_offset_failed")
             return
 
+        probe_direction = self._compute_port_frame_direction(1.0, 0.0, 0.0)
+        contact_axis = self._dominant_axis_name(probe_direction)
+        self._log(
+            "info",
+            "probe_wall_point_2_setup",
+            direction_x=round(probe_direction[0], 4),
+            direction_y=round(probe_direction[1], 4),
+            direction_z=round(probe_direction[2], 4),
+            offset_x=round(second_probe_offset[0], 4),
+            offset_y=round(second_probe_offset[1], 4),
+            offset_z=round(second_probe_offset[2], 4),
+            contact_axis=contact_axis,
+        )
         self._probe_result_2 = self._wall_probe.probe_until_contact(
-            direction_xyz=(1.0, 0.0, 0.0),
-            axis_name="x",
+            direction_xyz=probe_direction,
+            axis_name=contact_axis,
             threshold=self._force_threshold_x,
             max_travel_distance=self._max_probe_distance,
             timeout=self._probe_timeout,
@@ -266,9 +291,11 @@ class InsertionStateMachine:
         self._advance(InsertionState.APPROACH_WALL_NEAR_PORT)
 
     def _handle_approach_wall_near_port(self) -> None:
+        probe_direction = self._compute_port_frame_direction(1.0, 0.0, 0.0)
+        contact_axis = self._dominant_axis_name(probe_direction)
         result = self._wall_probe.probe_until_contact(
-            direction_xyz=(1.0, 0.0, 0.0),
-            axis_name="x",
+            direction_xyz=probe_direction,
+            axis_name=contact_axis,
             threshold=self._force_threshold_x,
             max_travel_distance=self._max_probe_distance,
             timeout=self._probe_timeout,
@@ -512,19 +539,26 @@ class InsertionStateMachine:
         self._transition(next_state)
 
     def _compute_port_frame_target(self, offset_x: float, offset_y: float, offset_z: float):
-        rotated_x, rotated_y, rotated_z = self._rotate_vector_by_quaternion(
+        rotated_x, rotated_y, rotated_z = self._compute_port_frame_direction(
             offset_x,
             offset_y,
             offset_z,
-            self._port_qx,
-            self._port_qy,
-            self._port_qz,
-            self._port_qw,
         )
         return (
             self._port_x + rotated_x,
             self._port_y + rotated_y,
             self._port_z + rotated_z,
+        )
+
+    def _compute_port_frame_direction(self, vector_x: float, vector_y: float, vector_z: float):
+        return self._rotate_vector_by_quaternion(
+            vector_x,
+            vector_y,
+            vector_z,
+            self._port_qx,
+            self._port_qy,
+            self._port_qz,
+            self._port_qw,
         )
 
     def _fail(self, reason: str) -> None:
@@ -595,6 +629,15 @@ class InsertionStateMachine:
     def _quaternion_from_yaw(yaw: float):
         half_yaw = 0.5 * yaw
         return (0.0, 0.0, math.sin(half_yaw), math.cos(half_yaw))
+
+    @staticmethod
+    def _dominant_axis_name(direction_xyz) -> str:
+        abs_components = {
+            "x": abs(direction_xyz[0]),
+            "y": abs(direction_xyz[1]),
+            "z": abs(direction_xyz[2]),
+        }
+        return max(abs_components, key=abs_components.get)
 
     @staticmethod
     def _log(level: str, event: str, **fields) -> None:

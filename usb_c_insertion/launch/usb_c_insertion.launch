@@ -9,8 +9,8 @@
   <arg name="port_qw" default="0.7071" />
 
   <arg name="auto_zero_ft" default="false" />
-  <arg name="stop_after_state" default="MOVE_TO_PREPOSE" />
-  <arg name="prepose_offset_port_x" default="-0.050" />
+  <arg name="stop_after_state" default="PROBE_WALL_POINT_1" />
+  <arg name="prepose_offset_port_x" default="-0.030" />
   <arg name="prepose_offset_port_y" default="0.000" />
   <arg name="prepose_offset_port_z" default="0.000" />
   <arg name="prepose_speed" default="0.010" />
