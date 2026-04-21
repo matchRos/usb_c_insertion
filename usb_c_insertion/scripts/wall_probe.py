@@ -53,6 +53,7 @@ class WallProbe:
         self._retract_distance = float(rospy.get_param("~probe/retract_distance", 0.01))
         self._max_probe_distance = float(rospy.get_param("~probe/max_probe_distance", 0.08))
         self._probe_timeout = float(rospy.get_param("~probe/probe_timeout", 10.0))
+        self._force_norm_threshold = float(rospy.get_param("~contact/force_threshold_norm", 4.0))
 
     def probe_until_contact(
         self,
@@ -122,7 +123,22 @@ class WallProbe:
                 self._robot_interface.stop_motion()
                 return self._log_and_return(False, None, self._get_wrench_snapshot(), "max_travel_reached")
 
-            if self._contact_detector.detect_contact_along_axis(axis_name, threshold):
+            axis_delta = self._contact_detector.get_force_delta_along_axis(axis_name)
+            norm_delta = self._contact_detector.get_force_delta_norm()
+            rospy.loginfo_throttle(
+                0.5,
+                "[usb_c_insertion] event=probe_progress axis=%s axis_delta=%.4f axis_threshold=%.4f norm_delta=%.4f norm_threshold=%.4f travel=%.4f",
+                axis_name,
+                axis_delta,
+                float(threshold),
+                norm_delta,
+                self._force_norm_threshold,
+                travel_distance,
+            )
+
+            axis_contact = self._contact_detector.detect_contact_along_axis(axis_name, threshold)
+            norm_contact = self._contact_detector.detect_contact_norm(self._force_norm_threshold)
+            if axis_contact or norm_contact:
                 self._robot_interface.stop_motion()
                 contact_point = self._pose_to_point_stamped(current_pose)
                 wrench_snapshot = self._get_wrench_snapshot()

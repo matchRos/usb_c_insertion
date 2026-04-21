@@ -56,8 +56,7 @@ class ContactDetector:
         if axis not in self._axis_contact_state:
             raise ValueError("axis_name must be one of: x, y, z")
 
-        filtered_wrench = self._ft_interface.get_filtered_wrench()
-        force_delta = abs(self._get_force_component(filtered_wrench, axis) - self._get_force_component(self._baseline, axis))
+        force_delta = self.get_force_delta_along_axis(axis)
         new_state = self._apply_hysteresis(
             previous_state=self._axis_contact_state[axis],
             signal_value=force_delta,
@@ -70,11 +69,7 @@ class ContactDetector:
         """
         Detect contact from the Euclidean norm of the force rise vector.
         """
-        filtered_wrench = self._ft_interface.get_filtered_wrench()
-        delta_x = filtered_wrench.force_x - self._baseline.force_x
-        delta_y = filtered_wrench.force_y - self._baseline.force_y
-        delta_z = filtered_wrench.force_z - self._baseline.force_z
-        force_norm_delta = math.sqrt(delta_x * delta_x + delta_y * delta_y + delta_z * delta_z)
+        force_norm_delta = self.get_force_delta_norm()
 
         self._norm_contact_state = self._apply_hysteresis(
             previous_state=self._norm_contact_state,
@@ -82,6 +77,30 @@ class ContactDetector:
             threshold=float(threshold),
         )
         return self._norm_contact_state
+
+    def get_force_delta_along_axis(self, axis_name: str) -> float:
+        """
+        Return the absolute filtered force change along one axis.
+        """
+        axis = axis_name.lower().strip()
+        if axis not in self._axis_contact_state:
+            raise ValueError("axis_name must be one of: x, y, z")
+
+        filtered_wrench = self._ft_interface.get_filtered_wrench()
+        return abs(
+            self._get_force_component(filtered_wrench, axis)
+            - self._get_force_component(self._baseline, axis)
+        )
+
+    def get_force_delta_norm(self) -> float:
+        """
+        Return the Euclidean norm of the filtered force change vector.
+        """
+        filtered_wrench = self._ft_interface.get_filtered_wrench()
+        delta_x = filtered_wrench.force_x - self._baseline.force_x
+        delta_y = filtered_wrench.force_y - self._baseline.force_y
+        delta_z = filtered_wrench.force_z - self._baseline.force_z
+        return math.sqrt(delta_x * delta_x + delta_y * delta_y + delta_z * delta_z)
 
     @staticmethod
     def _get_force_component(wrench: WrenchData, axis_name: str) -> float:
