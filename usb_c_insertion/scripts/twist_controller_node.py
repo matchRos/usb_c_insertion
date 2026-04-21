@@ -129,14 +129,16 @@ class TwistControllerNode:
         Convert the internal base_link twist convention to the controller convention.
 
         The controller expects x and y signs flipped relative to the planning
-        frame used by the rest of this package.
+        frame used by the rest of this package. The same frame rotation must
+        also be applied to angular velocity, so wx and wy change sign while wz
+        remains unchanged.
         """
         converted = Twist()
         converted.linear.x = -twist.linear.x
         converted.linear.y = -twist.linear.y
         converted.linear.z = twist.linear.z
-        converted.angular.x = twist.angular.x
-        converted.angular.y = twist.angular.y
+        converted.angular.x = -twist.angular.x
+        converted.angular.y = -twist.angular.y
         converted.angular.z = twist.angular.z
         return converted
 

@@ -5,14 +5,14 @@ motion:
   move_speed: 0.01
   max_linear_speed: 0.01
   max_angular_speed: 0.05
-  max_linear_acceleration: 0.03
-  max_angular_acceleration: 0.15
+  max_linear_acceleration: 0.02
+  max_angular_acceleration: 0.1
   twist_smoothing_alpha: 0.25
   watchdog_timeout: 0.1
   pose_servo_position_gain: 1.5
-  pose_servo_yaw_gain: 1.0
+  pose_servo_orientation_gain: 1.0
   pose_servo_position_tolerance: 0.0015
-  pose_servo_yaw_tolerance: 0.03
+  pose_servo_orientation_tolerance: 0.03
   pose_servo_target_timeout: 10.0
   command_rate: 100.0
 

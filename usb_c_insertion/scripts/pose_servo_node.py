@@ -33,9 +33,9 @@ class PoseServoNode:
 
         self._command_rate = float(rospy.get_param("~motion/command_rate", 500.0))
         self._position_gain = float(rospy.get_param("~motion/pose_servo_position_gain", 1.5))
-        self._yaw_gain = float(rospy.get_param("~motion/pose_servo_yaw_gain", 1.0))
+        self._orientation_gain = float(rospy.get_param("~motion/pose_servo_orientation_gain", 1.0))
         self._position_tolerance = float(rospy.get_param("~motion/pose_servo_position_tolerance", 0.0015))
-        self._yaw_tolerance = float(rospy.get_param("~motion/pose_servo_yaw_tolerance", 0.03))
+        self._orientation_tolerance = float(rospy.get_param("~motion/pose_servo_orientation_tolerance", 0.03))
         self._max_linear_speed = float(rospy.get_param("~motion/max_linear_speed", 0.01))
         self._max_angular_speed = float(rospy.get_param("~motion/max_angular_speed", 0.05))
 
@@ -72,11 +72,17 @@ class PoseServoNode:
             error_z = target.position.z - current_pose.pose.position.z
             distance = math.sqrt(error_x * error_x + error_y * error_y + error_z * error_z)
 
-            current_yaw = self._yaw_from_quaternion(current_pose.pose.orientation)
-            target_yaw = self._yaw_from_quaternion(target.orientation)
-            yaw_error = self._normalize_angle(target_yaw - current_yaw)
+            orientation_error = self._quaternion_error_vector(
+                current_pose.pose.orientation,
+                target.orientation,
+            )
+            orientation_error_norm = math.sqrt(
+                orientation_error[0] * orientation_error[0]
+                + orientation_error[1] * orientation_error[1]
+                + orientation_error[2] * orientation_error[2]
+            )
 
-            if distance <= self._position_tolerance and abs(yaw_error) <= self._yaw_tolerance:
+            if distance <= self._position_tolerance and orientation_error_norm <= self._orientation_tolerance:
                 self._enabled = False
                 self._send_zero_twist_once()
                 rate.sleep()
@@ -93,8 +99,14 @@ class PoseServoNode:
                 vy = error_y * scale
                 vz = error_z * scale
 
-            wz = max(-self._max_angular_speed, min(self._max_angular_speed, self._yaw_gain * yaw_error))
-            self._robot.send_twist(vx, vy, vz, 0.0, 0.0, wz)
+            angular_velocity = self._limit_angular_vector(
+                (
+                    self._orientation_gain * orientation_error[0],
+                    self._orientation_gain * orientation_error[1],
+                    self._orientation_gain * orientation_error[2],
+                )
+            )
+            self._robot.send_twist(vx, vy, vz, angular_velocity[0], angular_velocity[1], angular_velocity[2])
             self._zero_twist_sent = False
             rate.sleep()
 
@@ -120,19 +132,65 @@ class PoseServoNode:
         self._robot.send_zero_twist()
         self._zero_twist_sent = True
 
-    @staticmethod
-    def _yaw_from_quaternion(quaternion) -> float:
-        siny_cosp = 2.0 * (quaternion.w * quaternion.z + quaternion.x * quaternion.y)
-        cosy_cosp = 1.0 - 2.0 * (quaternion.y * quaternion.y + quaternion.z * quaternion.z)
-        return math.atan2(siny_cosp, cosy_cosp)
+    def _limit_angular_vector(self, angular_xyz):
+        norm = math.sqrt(sum(component * component for component in angular_xyz))
+        if norm <= 1e-9:
+            return (0.0, 0.0, 0.0)
+        scale = min(1.0, self._max_angular_speed / norm)
+        return tuple(component * scale for component in angular_xyz)
 
     @staticmethod
-    def _normalize_angle(angle: float) -> float:
-        while angle > math.pi:
-            angle -= 2.0 * math.pi
-        while angle < -math.pi:
-            angle += 2.0 * math.pi
-        return angle
+    def _quaternion_error_vector(current_orientation, target_orientation):
+        current = PoseServoNode._normalize_quaternion(
+            (
+                current_orientation.x,
+                current_orientation.y,
+                current_orientation.z,
+                current_orientation.w,
+            )
+        )
+        target = PoseServoNode._normalize_quaternion(
+            (
+                target_orientation.x,
+                target_orientation.y,
+                target_orientation.z,
+                target_orientation.w,
+            )
+        )
+
+        error = PoseServoNode._quaternion_multiply(target, PoseServoNode._quaternion_conjugate(current))
+        if error[3] < 0.0:
+            error = (-error[0], -error[1], -error[2], -error[3])
+
+        vector_norm = math.sqrt(error[0] * error[0] + error[1] * error[1] + error[2] * error[2])
+        if vector_norm <= 1e-9:
+            return (0.0, 0.0, 0.0)
+
+        angle = 2.0 * math.atan2(vector_norm, error[3])
+        axis = (error[0] / vector_norm, error[1] / vector_norm, error[2] / vector_norm)
+        return (axis[0] * angle, axis[1] * angle, axis[2] * angle)
+
+    @staticmethod
+    def _normalize_quaternion(quaternion_xyzw):
+        norm = math.sqrt(sum(component * component for component in quaternion_xyzw))
+        if norm <= 1e-9:
+            return (0.0, 0.0, 0.0, 1.0)
+        return tuple(component / norm for component in quaternion_xyzw)
+
+    @staticmethod
+    def _quaternion_conjugate(quaternion_xyzw):
+        return (-quaternion_xyzw[0], -quaternion_xyzw[1], -quaternion_xyzw[2], quaternion_xyzw[3])
+
+    @staticmethod
+    def _quaternion_multiply(first_xyzw, second_xyzw):
+        x1, y1, z1, w1 = first_xyzw
+        x2, y2, z2, w2 = second_xyzw
+        return (
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        )
 
 
 def main() -> None:

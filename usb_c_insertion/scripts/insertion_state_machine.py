@@ -160,6 +160,7 @@ class InsertionStateMachine:
             self._prepose_offset_port_y,
             self._prepose_offset_port_z,
         )
+        target_orientation = self._compute_tcp_target_orientation()
         self._log(
             "info",
             "move_to_prepose_target",
@@ -173,6 +174,10 @@ class InsertionStateMachine:
             port_qy=round(self._port_qy, 4),
             port_qz=round(self._port_qz, 4),
             port_qw=round(self._port_qw, 4),
+            tcp_qx=round(target_orientation[0], 4),
+            tcp_qy=round(target_orientation[1], 4),
+            tcp_qz=round(target_orientation[2], 4),
+            tcp_qw=round(target_orientation[3], 4),
         )
         success = self._move_to_xyz(
             target_x,
@@ -181,6 +186,7 @@ class InsertionStateMachine:
             speed=self._prepose_speed,
             timeout=self._prepose_timeout,
             move_name="move_to_prepose",
+            target_orientation=target_orientation,
         )
         if not success:
             self._fail("move_to_prepose_failed")
@@ -225,6 +231,12 @@ class InsertionStateMachine:
             speed=self._probe_speed,
             timeout=8.0,
             move_name="move_to_second_probe_offset",
+            target_orientation=(
+                current_pose.pose.orientation.x,
+                current_pose.pose.orientation.y,
+                current_pose.pose.orientation.z,
+                current_pose.pose.orientation.w,
+            ),
         )
         if not success:
             self._fail("move_to_second_probe_offset_failed")
@@ -285,13 +297,16 @@ class InsertionStateMachine:
             return
 
         current_yaw = self._yaw_from_quaternion(current_pose.pose.orientation)
-        target_yaw = math.atan2(self._wall_estimate.wall_normal_y, self._wall_estimate.wall_normal_x)
+        yaw_correction = self._wall_estimate.wall_yaw
+        target_yaw = self._normalize_angle(current_yaw + yaw_correction)
         yaw_error = self._normalize_angle(target_yaw - current_yaw)
         self._log(
             "info",
             "align_tool_yaw_command",
             current_yaw_rad=round(current_yaw, 4),
             target_yaw_rad=round(target_yaw, 4),
+            yaw_correction_rad=round(yaw_correction, 4),
+            yaw_correction_deg=round(math.degrees(yaw_correction), 3),
             yaw_error_rad=round(yaw_error, 4),
             yaw_error_deg=round(math.degrees(yaw_error), 3),
             turn_direction=("ccw" if yaw_error > 0.0 else "cw"),
@@ -302,6 +317,7 @@ class InsertionStateMachine:
         self._advance(InsertionState.MOVE_TO_PORT_PRECONTACT)
 
     def _handle_move_to_port_precontact(self) -> None:
+        target_orientation = self._compute_tcp_target_orientation()
         success = self._move_to_xyz(
             self._port_x + self._precontact_offset_x,
             self._port_y,
@@ -309,6 +325,7 @@ class InsertionStateMachine:
             speed=self._move_speed,
             timeout=8.0,
             move_name="move_to_port_precontact",
+            target_orientation=target_orientation,
         )
         if not success:
             self._fail("move_to_port_precontact_failed")
@@ -376,6 +393,12 @@ class InsertionStateMachine:
                 speed=self._search_speed,
                 timeout=4.0,
                 move_name="search_step",
+                target_orientation=(
+                    current_pose.pose.orientation.x,
+                    current_pose.pose.orientation.y,
+                    current_pose.pose.orientation.z,
+                    current_pose.pose.orientation.w,
+                ),
             ):
                 self._fail("search_motion_failed")
                 return
@@ -407,7 +430,16 @@ class InsertionStateMachine:
         else:
             self._fail("insertion_check_failed")
 
-    def _move_to_xyz(self, x: float, y: float, z: float, speed: float, timeout: float, move_name: str) -> bool:
+    def _move_to_xyz(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        speed: float,
+        timeout: float,
+        move_name: str,
+        target_orientation=None,
+    ) -> bool:
         start_pose = self._tf.get_tool_pose_in_base()
         if start_pose is None:
             self._robot.stop_motion()
@@ -434,8 +466,13 @@ class InsertionStateMachine:
             timeout=round(timeout, 2),
         )
 
-        target_yaw = self._yaw_from_quaternion(start_pose.pose.orientation)
-        target_orientation = self._quaternion_from_yaw(target_yaw)
+        if target_orientation is None:
+            target_orientation = (
+                start_pose.pose.orientation.x,
+                start_pose.pose.orientation.y,
+                start_pose.pose.orientation.z,
+                start_pose.pose.orientation.w,
+            )
         self._robot.send_pose_target(
             x,
             y,
@@ -506,7 +543,15 @@ class InsertionStateMachine:
             self._robot.stop_motion()
             return False
 
-        target_orientation = self._quaternion_from_yaw(target_yaw)
+        target_orientation = self._apply_yaw_delta_to_quaternion(
+            (
+                current_pose.pose.orientation.x,
+                current_pose.pose.orientation.y,
+                current_pose.pose.orientation.z,
+                current_pose.pose.orientation.w,
+            ),
+            yaw_error,
+        )
         self._robot.send_pose_target(
             current_pose.pose.position.x,
             current_pose.pose.position.y,
@@ -586,6 +631,29 @@ class InsertionStateMachine:
             self._port_qw,
         )
 
+    def _compute_tcp_target_orientation(self):
+        """
+        Build the desired TCP orientation from the PC frame orientation.
+
+        Required convention:
+        - z_tcp points along +x_pc
+        - y_tcp points along +z_pc
+        - x_tcp follows from the right-handed frame, which yields +y_pc
+        """
+        tcp_in_pc = self._quaternion_from_rotation_matrix(
+            (
+                (0.0, 0.0, 1.0),
+                (1.0, 0.0, 0.0),
+                (0.0, 1.0, 0.0),
+            )
+        )
+        return self._normalize_quaternion(
+            self._quaternion_multiply(
+                (self._port_qx, self._port_qy, self._port_qz, self._port_qw),
+                tcp_in_pc,
+            )
+        )
+
     def _fail(self, reason: str) -> None:
         self._failure_reason = reason
         self._transition(InsertionState.FAILURE)
@@ -656,6 +724,11 @@ class InsertionStateMachine:
         return (0.0, 0.0, math.sin(half_yaw), math.cos(half_yaw))
 
     @staticmethod
+    def _apply_yaw_delta_to_quaternion(quaternion_xyzw, yaw_delta: float):
+        delta_quaternion = InsertionStateMachine._quaternion_from_yaw(yaw_delta)
+        return InsertionStateMachine._quaternion_multiply(delta_quaternion, quaternion_xyzw)
+
+    @staticmethod
     def _dominant_axis_name(direction_xyz) -> str:
         abs_components = {
             "x": abs(direction_xyz[0]),
@@ -663,6 +736,58 @@ class InsertionStateMachine:
             "z": abs(direction_xyz[2]),
         }
         return max(abs_components, key=abs_components.get)
+
+    @staticmethod
+    def _quaternion_multiply(first_xyzw, second_xyzw):
+        x1, y1, z1, w1 = first_xyzw
+        x2, y2, z2, w2 = second_xyzw
+        return (
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        )
+
+    @staticmethod
+    def _normalize_quaternion(quaternion_xyzw):
+        norm = math.sqrt(sum(component * component for component in quaternion_xyzw))
+        if norm <= 1e-9:
+            return (0.0, 0.0, 0.0, 1.0)
+        return tuple(component / norm for component in quaternion_xyzw)
+
+    @staticmethod
+    def _quaternion_from_rotation_matrix(matrix_rows):
+        m00, m01, m02 = matrix_rows[0]
+        m10, m11, m12 = matrix_rows[1]
+        m20, m21, m22 = matrix_rows[2]
+        trace = m00 + m11 + m22
+
+        if trace > 0.0:
+            s = math.sqrt(trace + 1.0) * 2.0
+            qw = 0.25 * s
+            qx = (m21 - m12) / s
+            qy = (m02 - m20) / s
+            qz = (m10 - m01) / s
+        elif m00 > m11 and m00 > m22:
+            s = math.sqrt(1.0 + m00 - m11 - m22) * 2.0
+            qw = (m21 - m12) / s
+            qx = 0.25 * s
+            qy = (m01 + m10) / s
+            qz = (m02 + m20) / s
+        elif m11 > m22:
+            s = math.sqrt(1.0 + m11 - m00 - m22) * 2.0
+            qw = (m02 - m20) / s
+            qx = (m01 + m10) / s
+            qy = 0.25 * s
+            qz = (m12 + m21) / s
+        else:
+            s = math.sqrt(1.0 + m22 - m00 - m11) * 2.0
+            qw = (m10 - m01) / s
+            qx = (m02 + m20) / s
+            qy = (m12 + m21) / s
+            qz = 0.25 * s
+
+        return InsertionStateMachine._normalize_quaternion((qx, qy, qz, qw))
 
     @staticmethod
     def _log(level: str, event: str, **fields) -> None:
