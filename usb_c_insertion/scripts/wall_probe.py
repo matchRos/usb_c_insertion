@@ -123,19 +123,6 @@ class WallProbe:
                 self._robot_interface.stop_motion()
                 return self._log_and_return(False, None, self._get_wrench_snapshot(), "max_travel_reached")
 
-            axis_delta = self._contact_detector.get_force_delta_along_axis(axis_name)
-            norm_delta = self._contact_detector.get_force_delta_norm()
-            rospy.loginfo_throttle(
-                0.5,
-                "[usb_c_insertion] event=probe_progress axis=%s axis_delta=%.4f axis_threshold=%.4f norm_delta=%.4f norm_threshold=%.4f travel=%.4f",
-                axis_name,
-                axis_delta,
-                float(threshold),
-                norm_delta,
-                self._force_norm_threshold,
-                travel_distance,
-            )
-
             axis_contact = self._contact_detector.detect_contact_along_axis(axis_name, threshold)
             norm_contact = self._contact_detector.detect_contact_norm(self._force_norm_threshold)
             if axis_contact or norm_contact:
@@ -259,28 +246,12 @@ class WallProbe:
                 reason,
             )
         else:
-            if wrench_snapshot is None:
-                rospy.loginfo(
-                    "[usb_c_insertion] event=probe_result success=%s reason=%s contact_x=%.4f contact_y=%.4f contact_z=%.4f",
-                    str(success).lower(),
-                    reason,
-                    contact_point.point.x,
-                    contact_point.point.y,
-                    contact_point.point.z,
-                )
-            else:
-                rospy.loginfo(
-                    "[usb_c_insertion] event=probe_result success=%s reason=%s contact_x=%.4f contact_y=%.4f contact_z=%.4f force_x=%.4f force_y=%.4f force_z=%.4f torque_x=%.4f torque_y=%.4f torque_z=%.4f",
-                    str(success).lower(),
-                    reason,
-                    contact_point.point.x,
-                    contact_point.point.y,
-                    contact_point.point.z,
-                    wrench_snapshot.force_x,
-                    wrench_snapshot.force_y,
-                    wrench_snapshot.force_z,
-                    wrench_snapshot.torque_x,
-                    wrench_snapshot.torque_y,
-                    wrench_snapshot.torque_z,
-                )
+            rospy.loginfo(
+                "[usb_c_insertion] event=probe_result success=%s reason=%s contact_x=%.4f contact_y=%.4f contact_z=%.4f",
+                str(success).lower(),
+                reason,
+                contact_point.point.x,
+                contact_point.point.y,
+                contact_point.point.z,
+            )
         return ProbeResult(success, contact_point, wrench_snapshot, reason)

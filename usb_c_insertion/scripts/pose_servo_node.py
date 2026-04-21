@@ -65,7 +65,6 @@ class PoseServoNode:
             if current_pose is None:
                 rate.sleep()
                 continue
-            print(current_pose)
 
             target = self._target_pose.pose
             error_x = target.position.x - current_pose.pose.position.x

@@ -264,13 +264,38 @@ class InsertionStateMachine:
         except (AttributeError, ValueError) as exc:
             self._fail("estimate_wall_yaw_failed: %s" % exc)
             return
+        self._log(
+            "info",
+            "wall_yaw_estimate",
+            wall_yaw=round(self._wall_estimate.wall_yaw, 4),
+            wall_dir_x=round(self._wall_estimate.wall_direction_x, 4),
+            wall_dir_y=round(self._wall_estimate.wall_direction_y, 4),
+            wall_normal_x=round(self._wall_estimate.wall_normal_x, 4),
+            wall_normal_y=round(self._wall_estimate.wall_normal_y, 4),
+        )
         self._advance(InsertionState.ALIGN_TOOL_YAW)
 
     def _handle_align_tool_yaw(self) -> None:
         if self._wall_estimate is None:
             self._fail("missing_wall_estimate")
             return
+        current_pose = self._tf.get_tool_pose_in_base()
+        if current_pose is None:
+            self._fail("missing_tf_before_align_tool_yaw")
+            return
+
+        current_yaw = self._yaw_from_quaternion(current_pose.pose.orientation)
         target_yaw = math.atan2(self._wall_estimate.wall_normal_y, self._wall_estimate.wall_normal_x)
+        yaw_error = self._normalize_angle(target_yaw - current_yaw)
+        self._log(
+            "info",
+            "align_tool_yaw_command",
+            current_yaw_rad=round(current_yaw, 4),
+            target_yaw_rad=round(target_yaw, 4),
+            yaw_error_rad=round(yaw_error, 4),
+            yaw_error_deg=round(math.degrees(yaw_error), 3),
+            turn_direction=("ccw" if yaw_error > 0.0 else "cw"),
+        )
         if not self._align_yaw(target_yaw, timeout=6.0):
             self._fail("align_tool_yaw_failed")
             return
