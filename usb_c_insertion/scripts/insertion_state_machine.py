@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from enum import Enum
 import math
+import os
+import sys
 from typing import Optional
 
 import rospy
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
 
 from contact_detector import ContactDetector
 from ft_interface import FTInterface

@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import math
+import os
+import sys
 from typing import Dict
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
 
 from ft_interface import FTInterface, WrenchData
 

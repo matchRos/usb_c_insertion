@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import os
+import sys
 from typing import Optional, Tuple
 
 from geometry_msgs.msg import PointStamped
 import rospy
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
 
 from contact_detector import ContactDetector
 from ft_interface import WrenchData
