@@ -1,0 +1,28 @@
+<launch>
+  <node pkg="usb_c_insertion"
+        type="twist_controller_node.py"
+        name="usb_c_insertion_twist_controller"
+        output="screen">
+    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+  </node>
+
+  <node pkg="usb_c_insertion"
+        type="pose_servo_node.py"
+        name="usb_c_insertion_pose_servo"
+        output="screen">
+    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+  </node>
+
+  <node pkg="usb_c_insertion"
+        type="extract_cable.py"
+        name="usb_c_insertion_extract_cable"
+        output="screen">
+    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+  </node>
+</launch>

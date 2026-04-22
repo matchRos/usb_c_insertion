@@ -166,6 +166,7 @@ include_directories(
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
 catkin_install_python(PROGRAMS
+  scripts/extract_cable.py
   scripts/insertion_state_machine.py
   scripts/pose_servo_node.py
   scripts/twist_controller_node.py

@@ -15,6 +15,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from contact_detector import ContactDetector
+from extraction_controller import ExtractionController
 from ft_interface import FTInterface
 from insertion_controller import InsertionController
 from post_insertion_verifier import PostInsertionVerifier
@@ -39,6 +40,7 @@ class InsertionState(Enum):
     INSERT_CABLE = "INSERT_CABLE"
     CHECK_INSERTION = "CHECK_INSERTION"
     VERIFY_INSERTION = "VERIFY_INSERTION"
+    EXTRACT_CABLE = "EXTRACT_CABLE"
     SUCCESS = "SUCCESS"
     FAILURE = "FAILURE"
 
@@ -69,6 +71,7 @@ class InsertionStateMachine:
         self._wall_probe = WallProbe(self._robot, self._tf, self._contact_detector)
         self._insertion_controller = InsertionController(self._robot, self._tf, self._ft)
         self._post_insertion_verifier = PostInsertionVerifier(self._robot, self._tf, self._ft)
+        self._extraction_controller = ExtractionController(self._robot, self._tf, self._ft)
 
         self._command_rate = float(rospy.get_param("~motion/command_rate", 100.0))
         self._probe_speed = float(rospy.get_param("~motion/probe_speed", 0.003))
@@ -156,6 +159,8 @@ class InsertionStateMachine:
                 self._handle_check_insertion()
             elif self._state == InsertionState.VERIFY_INSERTION:
                 self._handle_verify_insertion()
+            elif self._state == InsertionState.EXTRACT_CABLE:
+                self._handle_extract_cable()
             elif self._state == InsertionState.SUCCESS:
                 self._robot.stop_motion()
                 self._log("info", "run_complete", result="success")
@@ -470,16 +475,15 @@ class InsertionStateMachine:
             self._fail("insertion_check_failed")
 
     def _handle_verify_insertion(self) -> None:
-        result = self._post_insertion_verifier.verify_and_release()
+        result = self._post_insertion_verifier.verify_retention()
         if result.success:
             self._log(
                 "info",
                 "post_insertion_verified",
                 counterforce_y=round(result.counterforce_y, 3),
                 counterforce_z=round(result.counterforce_z, 3),
-                gripper_opened=str(result.gripper_opened).lower(),
             )
-            self._advance(InsertionState.SUCCESS)
+            self._advance(InsertionState.EXTRACT_CABLE)
             return
 
         self._log(
@@ -490,6 +494,32 @@ class InsertionStateMachine:
             counterforce_z=round(result.counterforce_z, 3),
         )
         self._fail("post_insertion_verification_failed")
+
+    def _handle_extract_cable(self) -> None:
+        result = self._extraction_controller.extract()
+        if result.success:
+            self._log(
+                "info",
+                "cable_extracted",
+                extracted_distance=round(result.extracted_distance, 4),
+                pull_force=round(result.pull_force, 3),
+                lateral_force=round(result.lateral_force, 3),
+                torque_norm=round(result.torque_norm, 3),
+                gripper_opened=str(result.gripper_opened).lower(),
+            )
+            self._advance(InsertionState.SUCCESS)
+            return
+
+        self._log(
+            "err",
+            "cable_extraction_failed",
+            reason=result.reason,
+            extracted_distance=round(result.extracted_distance, 4),
+            pull_force=round(result.pull_force, 3),
+            lateral_force=round(result.lateral_force, 3),
+            torque_norm=round(result.torque_norm, 3),
+        )
+        self._fail("cable_extraction_failed")
 
     def _move_to_xyz(
         self,

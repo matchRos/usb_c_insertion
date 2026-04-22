@@ -8,7 +8,7 @@ from typing import Deque, Optional
 
 import rospy
 from geometry_msgs.msg import WrenchStamped
-from std_srvs.srv import Empty
+from std_srvs.srv import Trigger
 
 
 @dataclass(frozen=True)
@@ -137,8 +137,11 @@ class FTInterface:
         """
         try:
             rospy.wait_for_service(self._zero_service_name, timeout=service_timeout)
-            zero_client = rospy.ServiceProxy(self._zero_service_name, Empty)
-            zero_client()
+            zero_client = rospy.ServiceProxy(self._zero_service_name, Trigger)
+            response = zero_client()
+            if not response.success:
+                rospy.logwarn("Force-torque sensor zeroing request was rejected: %s", response.message)
+                return False
             rospy.loginfo("Force-torque sensor zeroing request sent successfully.")
             return True
         except (rospy.ROSException, rospy.ServiceException) as exc:

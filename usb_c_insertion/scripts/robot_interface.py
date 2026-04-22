@@ -134,6 +134,22 @@ class RobotInterface:
         rospy.logerr("[usb_c_insertion] event=gripper_open_command_failed")
         return False
 
+    def wait_for_motion_pipeline(self, timeout: float = 2.0, require_pose_servo: bool = False) -> bool:
+        """
+        Wait until the motion pipeline subscribers are connected.
+        """
+        deadline = rospy.Time.now() + rospy.Duration.from_sec(max(0.0, float(timeout)))
+        rate = rospy.Rate(20.0)
+        while not rospy.is_shutdown():
+            raw_twist_ready = self._raw_twist_publisher.get_num_connections() > 0
+            pose_ready = self._pose_target_publisher.get_num_connections() > 0
+            if raw_twist_ready and (pose_ready or not require_pose_servo):
+                return True
+            if rospy.Time.now() > deadline:
+                return False
+            rate.sleep()
+        return False
+
     def set_digital_output(self, pin: int, state: bool) -> bool:
         """
         Set a UR digital output through the driver service.
