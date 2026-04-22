@@ -46,12 +46,28 @@ search:
 
 insert:
   insertion_depth: 0.01
-  contact_force_target: 20.0
+  contact_force_target: 17.0
   contact_force_tolerance: 1.0
   force_control_gain: 0.001
   force_control_speed_limit: 0.008
   force_control_timeout: 8.0
   release_force_threshold: 2.0
+
+verify:
+  move_distance_y: 0.0001
+  move_distance_z: 0.0001
+  move_speed: 0.002
+  move_timeout: 2.0
+  counterforce_threshold_y: 5.0
+  counterforce_threshold_z: 5.0
+  settle_time: 0.1
+
+gripper:
+  open_via_script_command: false
+  open_script_command: ""
+  fallback_digital_output_pin: 0
+  fallback_digital_output_state: true
+  io_service_name: "/ur_hardware_interface/set_io"
 
 state_machine:
   enabled: true

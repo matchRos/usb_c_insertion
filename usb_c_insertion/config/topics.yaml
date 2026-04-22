@@ -4,3 +4,4 @@ topics:
   pose_target: "/usb_c_insertion/pose_target"
   pose_servo_enable: "/usb_c_insertion/pose_servo_enable"
   wrench: "/wrench"
+  script_command: "/ur_hardware_interface/script_command"

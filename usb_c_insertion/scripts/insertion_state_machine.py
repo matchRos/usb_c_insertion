@@ -17,6 +17,7 @@ if SCRIPT_DIR not in sys.path:
 from contact_detector import ContactDetector
 from ft_interface import FTInterface
 from insertion_controller import InsertionController
+from post_insertion_verifier import PostInsertionVerifier
 from robot_interface import RobotInterface
 from search_pattern import generate_raster_pattern
 from tf_interface import TFInterface
@@ -37,6 +38,7 @@ class InsertionState(Enum):
     SEARCH_FOR_PORT = "SEARCH_FOR_PORT"
     INSERT_CABLE = "INSERT_CABLE"
     CHECK_INSERTION = "CHECK_INSERTION"
+    VERIFY_INSERTION = "VERIFY_INSERTION"
     SUCCESS = "SUCCESS"
     FAILURE = "FAILURE"
 
@@ -66,6 +68,7 @@ class InsertionStateMachine:
         )
         self._wall_probe = WallProbe(self._robot, self._tf, self._contact_detector)
         self._insertion_controller = InsertionController(self._robot, self._tf, self._ft)
+        self._post_insertion_verifier = PostInsertionVerifier(self._robot, self._tf, self._ft)
 
         self._command_rate = float(rospy.get_param("~motion/command_rate", 100.0))
         self._probe_speed = float(rospy.get_param("~motion/probe_speed", 0.003))
@@ -150,6 +153,8 @@ class InsertionStateMachine:
                 self._handle_insert_cable()
             elif self._state == InsertionState.CHECK_INSERTION:
                 self._handle_check_insertion()
+            elif self._state == InsertionState.VERIFY_INSERTION:
+                self._handle_verify_insertion()
             elif self._state == InsertionState.SUCCESS:
                 self._robot.stop_motion()
                 self._log("info", "run_complete", result="success")
@@ -515,7 +520,7 @@ class InsertionStateMachine:
                 inserted_depth=round(result.inserted_depth, 4),
                 contact_force=round(result.contact_force, 3),
             )
-            self._advance(InsertionState.SUCCESS)
+            self._advance(InsertionState.VERIFY_INSERTION)
         else:
             self._log(
                 "err",
@@ -525,6 +530,28 @@ class InsertionStateMachine:
                 reason=result.reason,
             )
             self._fail("insertion_check_failed")
+
+    def _handle_verify_insertion(self) -> None:
+        result = self._post_insertion_verifier.verify_and_release()
+        if result.success:
+            self._log(
+                "info",
+                "post_insertion_verified",
+                counterforce_y=round(result.counterforce_y, 3),
+                counterforce_z=round(result.counterforce_z, 3),
+                gripper_opened=str(result.gripper_opened).lower(),
+            )
+            self._advance(InsertionState.SUCCESS)
+            return
+
+        self._log(
+            "err",
+            "post_insertion_verification_failed",
+            reason=result.reason,
+            counterforce_y=round(result.counterforce_y, 3),
+            counterforce_z=round(result.counterforce_z, 3),
+        )
+        self._fail("post_insertion_verification_failed")
 
     def _move_to_xyz(
         self,
