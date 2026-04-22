@@ -84,17 +84,6 @@ class WallProbe:
         deadline = rospy.Time.now() + rospy.Duration.from_sec(self._probe_timeout if timeout is None else float(timeout))
         rate = rospy.Rate(max(1.0, self._command_rate))
 
-        rospy.loginfo(
-            "[usb_c_insertion] event=probe_start axis=%s threshold=%.4f speed=%.4f max_travel=%.4f timeout=%.2f start_x=%.4f start_y=%.4f start_z=%.4f",
-            axis_name,
-            float(threshold),
-            commanded_speed,
-            max_travel,
-            (self._probe_timeout if timeout is None else float(timeout)),
-            start_pose.pose.position.x,
-            start_pose.pose.position.y,
-            start_pose.pose.position.z,
-        )
         self._contact_detector.update_baseline()
 
         while not rospy.is_shutdown():
@@ -159,11 +148,6 @@ class WallProbe:
             return
 
         opposite_direction = (-direction_xyz[0], -direction_xyz[1], -direction_xyz[2])
-        rospy.loginfo(
-            "[usb_c_insertion] event=probe_retract_start distance=%.4f speed=%.4f",
-            retract_distance,
-            self._retract_speed,
-        )
         rate = rospy.Rate(max(1.0, self._command_rate))
         while not rospy.is_shutdown():
             current_pose = self._tf_interface.get_tool_pose_in_base()
@@ -192,7 +176,6 @@ class WallProbe:
             rate.sleep()
 
         self._robot_interface.stop_motion()
-        rospy.loginfo("[usb_c_insertion] event=probe_retract_complete")
 
     @staticmethod
     def _normalize_direction(direction_xyz: Tuple[float, float, float]) -> Tuple[float, float, float]:

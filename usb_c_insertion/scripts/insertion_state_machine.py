@@ -180,24 +180,6 @@ class InsertionStateMachine:
             self._prepose_offset_port_z,
         )
         target_orientation = self._compute_tcp_target_orientation()
-        self._log(
-            "info",
-            "move_to_prepose_target",
-            offset_port_x=round(self._prepose_offset_port_x, 4),
-            offset_port_y=round(self._prepose_offset_port_y, 4),
-            offset_port_z=round(self._prepose_offset_port_z, 4),
-            target_x=round(target_x, 4),
-            target_y=round(target_y, 4),
-            target_z=round(target_z, 4),
-            port_qx=round(self._port_qx, 4),
-            port_qy=round(self._port_qy, 4),
-            port_qz=round(self._port_qz, 4),
-            port_qw=round(self._port_qw, 4),
-            tcp_qx=round(target_orientation[0], 4),
-            tcp_qy=round(target_orientation[1], 4),
-            tcp_qz=round(target_orientation[2], 4),
-            tcp_qw=round(target_orientation[3], 4),
-        )
         success = self._move_to_xyz(
             target_x,
             target_y,
@@ -233,17 +215,6 @@ class InsertionStateMachine:
 
         probe_direction = self._compute_port_frame_direction(1.0, 0.0, 0.0)
         contact_axis = self._dominant_axis_name(probe_direction)
-        self._log(
-            "info",
-            "probe_wall_point_1_setup",
-            start_x=round(first_probe_target_x, 4),
-            start_y=round(first_probe_target_y, 4),
-            start_z=round(first_probe_target_z, 4),
-            direction_x=round(probe_direction[0], 4),
-            direction_y=round(probe_direction[1], 4),
-            direction_z=round(probe_direction[2], 4),
-            contact_axis=contact_axis,
-        )
         self._probe_result_1 = self._wall_probe.probe_until_contact(
             direction_xyz=probe_direction,
             axis_name=contact_axis,
@@ -279,18 +250,6 @@ class InsertionStateMachine:
 
         probe_direction = self._compute_port_frame_direction(1.0, 0.0, 0.0)
         contact_axis = self._dominant_axis_name(probe_direction)
-        self._log(
-            "info",
-            "probe_wall_point_2_setup",
-            start_x=round(second_probe_target_x, 4),
-            start_y=round(second_probe_target_y, 4),
-            start_z=round(second_probe_target_z, 4),
-            direction_x=round(probe_direction[0], 4),
-            direction_y=round(probe_direction[1], 4),
-            direction_z=round(probe_direction[2], 4),
-            lateral_span=round(self._second_probe_y_offset, 4),
-            contact_axis=contact_axis,
-        )
         self._probe_result_2 = self._wall_probe.probe_until_contact(
             direction_xyz=probe_direction,
             axis_name=contact_axis,
@@ -312,15 +271,6 @@ class InsertionStateMachine:
         except (AttributeError, ValueError) as exc:
             self._fail("estimate_wall_yaw_failed: %s" % exc)
             return
-        self._log(
-            "info",
-            "wall_yaw_estimate",
-            wall_yaw=round(self._wall_estimate.wall_yaw, 4),
-            wall_dir_x=round(self._wall_estimate.wall_direction_x, 4),
-            wall_dir_y=round(self._wall_estimate.wall_direction_y, 4),
-            wall_normal_x=round(self._wall_estimate.wall_normal_x, 4),
-            wall_normal_y=round(self._wall_estimate.wall_normal_y, 4),
-        )
         self._advance(InsertionState.ALIGN_TOOL_YAW)
 
     def _handle_align_tool_yaw(self) -> None:
@@ -336,17 +286,6 @@ class InsertionStateMachine:
         yaw_correction = self._wall_estimate.wall_yaw
         target_yaw = self._normalize_angle(current_yaw + yaw_correction)
         yaw_error = self._normalize_angle(target_yaw - current_yaw)
-        self._log(
-            "info",
-            "align_tool_yaw_command",
-            current_yaw_rad=round(current_yaw, 4),
-            target_yaw_rad=round(target_yaw, 4),
-            yaw_correction_rad=round(yaw_correction, 4),
-            yaw_correction_deg=round(math.degrees(yaw_correction), 3),
-            yaw_error_rad=round(yaw_error, 4),
-            yaw_error_deg=round(math.degrees(yaw_error), 3),
-            turn_direction=("ccw" if yaw_error > 0.0 else "cw"),
-        )
         if not self._align_yaw(target_yaw, timeout=6.0):
             self._fail("align_tool_yaw_failed")
             return
@@ -432,19 +371,6 @@ class InsertionStateMachine:
             current_pose.pose.orientation.z,
             current_pose.pose.orientation.w,
         )
-        self._log(
-            "info",
-            "search_setup",
-            start_x=round(current_x, 4),
-            start_y=round(current_y, 4),
-            start_z=round(current_z, 4),
-            wall_dir_x=round(wall_x, 4),
-            wall_dir_y=round(wall_y, 4),
-            step_tangent=round(self._search_step_y, 4),
-            step_vertical=round(self._search_step_z, 4),
-            force_target=round(self._search_contact_force_target, 3),
-        )
-
         for offset in pattern:
             if rospy.is_shutdown():
                 self._fail("shutdown_during_search")
@@ -519,6 +445,7 @@ class InsertionStateMachine:
                 "insertion_check_passed",
                 inserted_depth=round(result.inserted_depth, 4),
                 contact_force=round(result.contact_force, 3),
+                reason=result.reason,
             )
             self._advance(InsertionState.VERIFY_INSERTION)
         else:
@@ -574,21 +501,6 @@ class InsertionStateMachine:
             + (y - start_pose.pose.position.y) ** 2
             + (z - start_pose.pose.position.z) ** 2
         )
-        self._log(
-            "info",
-            "move_start",
-            move=move_name,
-            start_x=round(start_pose.pose.position.x, 4),
-            start_y=round(start_pose.pose.position.y, 4),
-            start_z=round(start_pose.pose.position.z, 4),
-            target_x=round(x, 4),
-            target_y=round(y, 4),
-            target_z=round(z, 4),
-            distance=round(start_distance, 4),
-            speed=round(speed, 4),
-            timeout=round(timeout, 2),
-        )
-
         if target_orientation is None:
             target_orientation = (
                 start_pose.pose.orientation.x,
@@ -645,15 +557,6 @@ class InsertionStateMachine:
             distance = math.sqrt(error_x * error_x + error_y * error_y + error_z * error_z)
             if distance <= self._position_tolerance:
                 self._robot.stop_motion()
-                self._log(
-                    "info",
-                    "move_complete",
-                    move=move_name,
-                    final_x=round(pose.pose.position.x, 4),
-                    final_y=round(pose.pose.position.y, 4),
-                    final_z=round(pose.pose.position.z, 4),
-                    remaining_distance=round(distance, 4),
-                )
                 return True
             rate.sleep()
 
@@ -728,13 +631,6 @@ class InsertionStateMachine:
 
             contact_force = self._get_search_contact_force()
             force_error = target_force - contact_force
-            self._log(
-                "info",
-                "force_control_progress",
-                contact_force=round(contact_force, 3),
-                force_error=round(force_error, 3),
-            )
-
             if self._detect_insertion_event():
                 self._robot.stop_motion()
                 self._log(
@@ -776,13 +672,6 @@ class InsertionStateMachine:
         )
         contact_force = self._get_search_contact_force()
         force_drop = self._search_contact_force_target - contact_force
-        self._log(
-            "info",
-            "search_insertion_check",
-            inserted_depth=round(inserted_depth, 4),
-            contact_force=round(contact_force, 3),
-            force_drop=round(force_drop, 3),
-        )
         return (
             inserted_depth >= self._insertion_jump_distance
             and force_drop >= self._insertion_force_drop_threshold

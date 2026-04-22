@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<launch>
+    <include file="$(find ur_robot_driver)/launch/ur5e_bringup.launch">
+        <arg name="robot_ip" value="ur"/>
+        <arg name="kinematics_config" value="$(find usb_c_insertion)/config/ur5e_robot_calibration.yaml"/>
+    </include>
+    <node name="enable_ur" pkg="usb_c_insertion" type="enable_ur.py" output="screen">
+        <param name="startup_timeout" value="10.0"/>
+    </node>
+
+</launch>

@@ -66,12 +66,6 @@ class InsertionController:
         deadline = rospy.Time.now() + rospy.Duration.from_sec(self._force_control_timeout)
         rate = rospy.Rate(max(1.0, self._command_rate))
 
-        rospy.loginfo(
-            "[usb_c_insertion] event=insert_cable_start target_force=%.3f target_depth=%.4f",
-            self._contact_force_target,
-            self._insertion_depth,
-        )
-
         while not rospy.is_shutdown():
             if rospy.Time.now() > deadline:
                 self._robot.stop_motion()
@@ -94,21 +88,16 @@ class InsertionController:
             )
             contact_force = self._get_contact_force()
             force_error = self._contact_force_target - contact_force
-            rospy.loginfo(
-                "[usb_c_insertion] event=insert_cable_progress inserted_depth=%.4f contact_force=%.3f force_error=%.3f",
-                inserted_depth,
-                contact_force,
-                force_error,
-            )
-
-            if inserted_depth >= self._insertion_depth and contact_force <= self._release_force_threshold:
+            success_reason = self._success_reason(inserted_depth, contact_force)
+            if success_reason is not None:
                 self._robot.stop_motion()
                 rospy.loginfo(
-                    "[usb_c_insertion] event=insert_cable_complete inserted_depth=%.4f contact_force=%.3f",
+                    "[usb_c_insertion] event=insert_cable_complete reason=%s inserted_depth=%.4f contact_force=%.3f",
+                    success_reason,
                     inserted_depth,
                     contact_force,
                 )
-                return InsertionResult(True, "completed", inserted_depth, contact_force)
+                return InsertionResult(True, success_reason, inserted_depth, contact_force)
 
             if abs(force_error) <= self._contact_force_tolerance:
                 speed = self._force_control_speed_limit
@@ -153,10 +142,10 @@ class InsertionController:
             pose.pose.position.z,
         )
         contact_force = self._get_contact_force()
-        success = inserted_depth >= self._insertion_depth and contact_force <= self._release_force_threshold
+        success_reason = self._success_reason(inserted_depth, contact_force)
         return InsertionResult(
-            success=success,
-            reason=("passed" if success else "threshold_not_met"),
+            success=(success_reason is not None),
+            reason=(success_reason or "threshold_not_met"),
             inserted_depth=inserted_depth,
             contact_force=contact_force,
         )
@@ -184,6 +173,13 @@ class InsertionController:
     def _get_contact_force(self) -> float:
         wrench = self._ft.get_filtered_wrench()
         return max(0.0, -wrench.force_z)
+
+    def _success_reason(self, inserted_depth: float, contact_force: float):
+        if inserted_depth >= self._insertion_depth:
+            return "depth_reached"
+        if contact_force >= self._contact_force_target:
+            return "force_reached"
+        return None
 
     @staticmethod
     def _normalize_vector(direction_xyz: Tuple[float, float, float]) -> Tuple[float, float, float]:
