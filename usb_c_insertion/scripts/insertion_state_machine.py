@@ -77,6 +77,13 @@ class InsertionStateMachine:
         self._search_width = float(rospy.get_param("~search/max_search_width", 0.01))
         self._search_height = float(rospy.get_param("~search/max_search_height", 0.01))
         self._search_timeout = float(rospy.get_param("~search/search_timeout", 20.0))
+        self._search_contact_force_target = float(rospy.get_param("~search/contact_force_target", 4.0))
+        self._search_contact_force_tolerance = float(rospy.get_param("~search/contact_force_tolerance", 0.5))
+        self._search_force_control_gain = float(rospy.get_param("~search/force_control_gain", 0.001))
+        self._search_force_control_speed_limit = float(rospy.get_param("~search/force_control_speed_limit", 0.002))
+        self._search_force_control_timeout = float(rospy.get_param("~search/force_control_timeout", 2.0))
+        self._insertion_jump_distance = float(rospy.get_param("~search/insertion_jump_distance", 0.002))
+        self._insertion_force_drop_threshold = float(rospy.get_param("~search/insertion_force_drop_threshold", 1.5))
         self._force_threshold_x = float(rospy.get_param("~contact/force_threshold_x", 4.0))
         self._force_threshold_norm = float(rospy.get_param("~contact/force_threshold_norm", 5.0))
         self._auto_zero_ft = bool(rospy.get_param("~state_machine/auto_zero_ft", True))
@@ -106,6 +113,8 @@ class InsertionStateMachine:
         self._probe_result_2: Optional[ProbeResult] = None
         self._wall_estimate = None
         self._last_search_reference_x: Optional[float] = None
+        self._search_reference_point = None
+        self._search_probe_direction = None
 
         rospy.on_shutdown(self._robot.stop_motion)
 
@@ -196,11 +205,32 @@ class InsertionStateMachine:
         self._advance(InsertionState.PROBE_WALL_POINT_1)
 
     def _handle_probe_wall_point_1(self) -> None:
+        target_orientation = self._compute_tcp_target_orientation()
+        first_probe_target_x, first_probe_target_y, first_probe_target_z = self._compute_port_frame_target(
+            self._prepose_offset_port_x,
+            -0.5 * self._second_probe_y_offset,
+            self._prepose_offset_port_z,
+        )
+        if not self._move_to_xyz(
+            first_probe_target_x,
+            first_probe_target_y,
+            first_probe_target_z,
+            speed=self._probe_speed,
+            timeout=8.0,
+            move_name="move_to_first_probe_offset",
+            target_orientation=target_orientation,
+        ):
+            self._fail("move_to_first_probe_offset_failed")
+            return
+
         probe_direction = self._compute_port_frame_direction(1.0, 0.0, 0.0)
         contact_axis = self._dominant_axis_name(probe_direction)
         self._log(
             "info",
             "probe_wall_point_1_setup",
+            start_x=round(first_probe_target_x, 4),
+            start_y=round(first_probe_target_y, 4),
+            start_z=round(first_probe_target_z, 4),
             direction_x=round(probe_direction[0], 4),
             direction_y=round(probe_direction[1], 4),
             direction_z=round(probe_direction[2], 4),
@@ -219,26 +249,21 @@ class InsertionStateMachine:
         self._advance(InsertionState.PROBE_WALL_POINT_2)
 
     def _handle_probe_wall_point_2(self) -> None:
-        current_pose = self._tf.get_tool_pose_in_base()
-        if current_pose is None:
-            self._fail("missing_tf_before_second_probe")
-            return
-
-        second_probe_offset = self._compute_port_frame_direction(0.0, self._second_probe_y_offset, 0.0)
+        target_orientation = self._compute_tcp_target_orientation()
+        second_probe_target_x, second_probe_target_y, second_probe_target_z = self._compute_port_frame_target(
+            self._prepose_offset_port_x,
+            0.5 * self._second_probe_y_offset,
+            self._prepose_offset_port_z,
+        )
 
         success = self._move_to_xyz(
-            current_pose.pose.position.x + second_probe_offset[0],
-            current_pose.pose.position.y + second_probe_offset[1],
-            current_pose.pose.position.z + second_probe_offset[2],
+            second_probe_target_x,
+            second_probe_target_y,
+            second_probe_target_z,
             speed=self._probe_speed,
             timeout=8.0,
             move_name="move_to_second_probe_offset",
-            target_orientation=(
-                current_pose.pose.orientation.x,
-                current_pose.pose.orientation.y,
-                current_pose.pose.orientation.z,
-                current_pose.pose.orientation.w,
-            ),
+            target_orientation=target_orientation,
         )
         if not success:
             self._fail("move_to_second_probe_offset_failed")
@@ -249,12 +274,13 @@ class InsertionStateMachine:
         self._log(
             "info",
             "probe_wall_point_2_setup",
+            start_x=round(second_probe_target_x, 4),
+            start_y=round(second_probe_target_y, 4),
+            start_z=round(second_probe_target_z, 4),
             direction_x=round(probe_direction[0], 4),
             direction_y=round(probe_direction[1], 4),
             direction_z=round(probe_direction[2], 4),
-            offset_x=round(second_probe_offset[0], 4),
-            offset_y=round(second_probe_offset[1], 4),
-            offset_z=round(second_probe_offset[2], 4),
+            lateral_span=round(self._second_probe_y_offset, 4),
             contact_axis=contact_axis,
         )
         self._probe_result_2 = self._wall_probe.probe_until_contact(
@@ -340,6 +366,10 @@ class InsertionStateMachine:
         self._advance(InsertionState.APPROACH_WALL_NEAR_PORT)
 
     def _handle_approach_wall_near_port(self) -> None:
+        if not self._zero_ft_for_search():
+            self._fail("zero_ft_before_search_failed")
+            return
+
         probe_direction = self._compute_port_frame_direction(1.0, 0.0, 0.0)
         contact_axis = self._dominant_axis_name(probe_direction)
         result = self._wall_probe.probe_until_contact(
@@ -354,11 +384,20 @@ class InsertionStateMachine:
             self._fail("approach_wall_near_port_failed")
             return
         self._last_search_reference_x = result.contact_point.point.x
+        self._search_reference_point = (
+            result.contact_point.point.x,
+            result.contact_point.point.y,
+            result.contact_point.point.z,
+        )
+        self._search_probe_direction = probe_direction
         self._advance(InsertionState.SEARCH_FOR_PORT)
 
     def _handle_search_for_port(self) -> None:
         if self._wall_estimate is None or self._last_search_reference_x is None:
             self._fail("missing_search_context")
+            return
+        if self._search_reference_point is None or self._search_probe_direction is None:
+            self._fail("missing_search_reference")
             return
 
         started_at = rospy.Time.now()
@@ -395,6 +434,7 @@ class InsertionStateMachine:
             wall_dir_y=round(wall_y, 4),
             step_tangent=round(self._search_step_y, 4),
             step_vertical=round(self._search_step_z, 4),
+            force_target=round(self._search_contact_force_target, 3),
         )
 
         for offset in pattern:
@@ -422,11 +462,16 @@ class InsertionStateMachine:
                 self._fail("search_motion_failed")
                 return
 
-            self._robot.send_twist(self._probe_speed, 0.0, 0.0, 0.0, 0.0, 0.0)
-            rospy.sleep(0.2)
-            self._robot.stop_motion()
+            if not self._regulate_contact_force(
+                self._search_probe_direction,
+                target_force=self._search_contact_force_target,
+                tolerance=self._search_contact_force_tolerance,
+                timeout=self._search_force_control_timeout,
+            ):
+                self._fail("search_force_control_failed")
+                return
 
-            if not self._contact_detector.detect_contact_norm(self._force_threshold_norm):
+            if self._detect_insertion_event():
                 self._advance(InsertionState.CHECK_INSERTION)
                 return
 
@@ -442,9 +487,14 @@ class InsertionStateMachine:
             self._fail("missing_tf_for_insertion_check")
             return
 
-        inserted_depth = pose.pose.position.x - self._last_search_reference_x
-        still_in_contact = self._contact_detector.detect_contact_norm(self._force_threshold_norm)
-        if inserted_depth >= self._insertion_depth and not still_in_contact:
+        inserted_depth = self._project_displacement_from_reference(
+            pose.pose.position.x,
+            pose.pose.position.y,
+            pose.pose.position.z,
+        )
+        contact_force = self._get_search_contact_force()
+        force_drop = self._search_contact_force_target - contact_force
+        if inserted_depth >= self._insertion_depth and force_drop >= self._insertion_force_drop_threshold:
             self._advance(InsertionState.SUCCESS)
         else:
             self._fail("insertion_check_failed")
@@ -607,6 +657,95 @@ class InsertionStateMachine:
         self._robot.stop_motion()
         return False
 
+    def _regulate_contact_force(self, direction_xyz, target_force: float, tolerance: float, timeout: float) -> bool:
+        deadline = rospy.Time.now() + rospy.Duration.from_sec(timeout)
+        rate = rospy.Rate(max(1.0, self._command_rate))
+        direction = self._normalize_vector(direction_xyz)
+
+        while not rospy.is_shutdown():
+            if rospy.Time.now() > deadline:
+                self._robot.stop_motion()
+                self._log("err", "force_control_timeout", target_force=round(target_force, 3))
+                return False
+            if self._ft.is_wrench_stale():
+                self._robot.stop_motion()
+                self._log("err", "force_control_stale_wrench")
+                return False
+
+            contact_force = self._get_search_contact_force()
+            force_error = target_force - contact_force
+            self._log(
+                "info",
+                "force_control_progress",
+                contact_force=round(contact_force, 3),
+                force_error=round(force_error, 3),
+            )
+
+            if self._detect_insertion_event():
+                self._robot.stop_motion()
+                self._log(
+                    "info",
+                    "force_control_insertion_event",
+                    contact_force=round(contact_force, 3),
+                )
+                return True
+
+            if abs(force_error) <= tolerance:
+                self._robot.stop_motion()
+                return True
+
+            speed = max(
+                -self._search_force_control_speed_limit,
+                min(self._search_force_control_speed_limit, self._search_force_control_gain * force_error),
+            )
+            self._robot.send_twist(
+                direction[0] * speed,
+                direction[1] * speed,
+                direction[2] * speed,
+                0.0,
+                0.0,
+                0.0,
+            )
+            rate.sleep()
+
+        self._robot.stop_motion()
+        return False
+
+    def _detect_insertion_event(self) -> bool:
+        pose = self._tf.get_tool_pose_in_base()
+        if pose is None:
+            return False
+        inserted_depth = self._project_displacement_from_reference(
+            pose.pose.position.x,
+            pose.pose.position.y,
+            pose.pose.position.z,
+        )
+        contact_force = self._get_search_contact_force()
+        force_drop = self._search_contact_force_target - contact_force
+        self._log(
+            "info",
+            "search_insertion_check",
+            inserted_depth=round(inserted_depth, 4),
+            contact_force=round(contact_force, 3),
+            force_drop=round(force_drop, 3),
+        )
+        return (
+            inserted_depth >= self._insertion_jump_distance
+            and force_drop >= self._insertion_force_drop_threshold
+        )
+
+    def _get_search_contact_force(self) -> float:
+        wrench = self._ft.get_filtered_wrench()
+        return max(0.0, -wrench.force_z)
+
+    def _zero_ft_for_search(self) -> bool:
+        if not self._auto_zero_ft:
+            return True
+        if not self._ft.zero_sensor():
+            return False
+        rospy.sleep(0.5)
+        return True
+
     def _transition(self, next_state: InsertionState) -> None:
         previous_state = self._state
         self._state = next_state
@@ -758,6 +897,19 @@ class InsertionStateMachine:
             "z": abs(direction_xyz[2]),
         }
         return max(abs_components, key=abs_components.get)
+
+    @staticmethod
+    def _normalize_vector(direction_xyz):
+        magnitude = math.sqrt(sum(component * component for component in direction_xyz))
+        if magnitude <= 1e-9:
+            raise ValueError("direction_xyz must be non-zero")
+        return tuple(component / magnitude for component in direction_xyz)
+
+    def _project_displacement_from_reference(self, x: float, y: float, z: float) -> float:
+        reference_x, reference_y, reference_z = self._search_reference_point
+        direction = self._normalize_vector(self._search_probe_direction)
+        delta = (x - reference_x, y - reference_y, z - reference_z)
+        return sum(delta[index] * direction[index] for index in range(3))
 
     @staticmethod
     def _quaternion_multiply(first_xyzw, second_xyzw):

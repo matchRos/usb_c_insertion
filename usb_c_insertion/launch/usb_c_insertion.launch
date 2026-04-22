@@ -1,7 +1,7 @@
 <launch>
-  <arg name="port_x" default="0.587" />
-  <arg name="port_y" default="-0.093" />
-  <arg name="port_z" default="0.018" />
+  <arg name="port_x" default="0.611" />
+  <arg name="port_y" default="-0.095" />
+  <arg name="port_z" default="0.241" />
 
   <arg name="port_qx" default="0.000" />
   <arg name="port_qy" default="0.000" />

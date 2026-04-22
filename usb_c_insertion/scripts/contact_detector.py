@@ -102,6 +102,33 @@ class ContactDetector:
         delta_z = filtered_wrench.force_z - self._baseline.force_z
         return math.sqrt(delta_x * delta_x + delta_y * delta_y + delta_z * delta_z)
 
+    def get_force_delta_vector(self):
+        """
+        Return the filtered force change vector relative to the current baseline.
+        """
+        filtered_wrench = self._ft_interface.get_filtered_wrench()
+        return (
+            filtered_wrench.force_x - self._baseline.force_x,
+            filtered_wrench.force_y - self._baseline.force_y,
+            filtered_wrench.force_z - self._baseline.force_z,
+        )
+
+    def get_contact_force_along_direction(self, direction_xyz) -> float:
+        """
+        Estimate contact force magnitude along a commanded approach direction.
+
+        A positive returned value means the environment is pushing back against
+        motion along the provided direction.
+        """
+        magnitude = math.sqrt(sum(component * component for component in direction_xyz))
+        if magnitude <= 1e-9:
+            raise ValueError("direction_xyz must be non-zero")
+
+        direction = tuple(component / magnitude for component in direction_xyz)
+        delta_force = self.get_force_delta_vector()
+        projected_force = sum(delta_force[index] * direction[index] for index in range(3))
+        return max(0.0, -projected_force)
+
     @staticmethod
     def _get_force_component(wrench: WrenchData, axis_name: str) -> float:
         if axis_name == "x":

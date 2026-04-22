@@ -1,5 +1,5 @@
 motion:
-  probe_speed: 0.003
+  probe_speed: 0.005
   retract_speed: 0.008
   search_speed: 0.002
   move_speed: 0.01
@@ -18,16 +18,16 @@ motion:
 
 contact:
   baseline_window: 50
-  force_threshold_x: 4.0
-  force_threshold_y: 4.0
-  force_threshold_z: 4.0
+  force_threshold_x: 3.0
+  force_threshold_y: 3.0
+  force_threshold_z: 3.0
   torque_threshold: 0.2
   wrench_timeout: 0.2
 
 probe:
   retract_distance: 0.01
   second_probe_y_offset: 0.02
-  max_probe_distance: 0.05
+  max_probe_distance: 0.1
   probe_timeout: 10.0
 
 search:
@@ -36,6 +36,13 @@ search:
   max_search_width: 0.01
   max_search_height: 0.01
   search_timeout: 20.0
+  contact_force_target: 4.0
+  contact_force_tolerance: 0.5
+  force_control_gain: 0.001
+  force_control_speed_limit: 0.002
+  force_control_timeout: 2.0
+  insertion_jump_distance: 0.002
+  insertion_force_drop_threshold: 1.5
 
 state_machine:
   enabled: true
