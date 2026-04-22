@@ -19,7 +19,7 @@ from ft_interface import FTInterface
 from insertion_controller import InsertionController
 from post_insertion_verifier import PostInsertionVerifier
 from robot_interface import RobotInterface
-from search_pattern import generate_expanding_circle_pattern
+from search_pattern import generate_raster_pattern
 from tf_interface import TFInterface
 from wall_frame_estimator import estimate_wall_yaw
 from wall_probe import ProbeResult, WallProbe
@@ -91,7 +91,6 @@ class InsertionStateMachine:
         self._search_force_control_speed_limit = float(rospy.get_param("~search/force_control_speed_limit", 0.002))
         self._search_force_control_timeout = float(rospy.get_param("~search/force_control_timeout", 2.0))
         self._search_socket_depth_threshold = float(rospy.get_param("~search/socket_depth_threshold", 0.002))
-        self._insertion_force_drop_threshold = float(rospy.get_param("~search/insertion_force_drop_threshold", 1.5))
         self._force_threshold_x = float(rospy.get_param("~contact/force_threshold_x", 4.0))
         self._force_threshold_norm = float(rospy.get_param("~contact/force_threshold_norm", 5.0))
         self._auto_zero_ft = bool(rospy.get_param("~state_machine/auto_zero_ft", True))
@@ -361,10 +360,11 @@ class InsertionStateMachine:
             return
 
         started_at = rospy.Time.now()
-        pattern = generate_expanding_circle_pattern(
-            radial_step=min(self._search_step_y, self._search_step_z),
-            max_radius_x=0.5 * self._search_width,
-            max_radius_y=0.5 * self._search_height,
+        pattern = generate_raster_pattern(
+            step_x=self._search_step_y,
+            step_y=self._search_step_z,
+            width=self._search_width,
+            height=self._search_height,
         )
         current_pose = self._tf.get_tool_pose_in_base()
         if current_pose is None:

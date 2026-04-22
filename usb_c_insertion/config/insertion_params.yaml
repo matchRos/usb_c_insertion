@@ -33,18 +33,17 @@ probe:
   probe_timeout: 10.0
 
 search:
-  step_y: 0.0015
-  step_z: 0.0015
-  max_search_width: 0.015
+  step_y: 0.001
+  step_z: 0.001
+  max_search_width: 0.02
   max_search_height: 0.02
-  search_timeout: 30.0
+  search_timeout: 50.0
   contact_force_target: 2.0
   contact_force_tolerance: 0.5
   force_control_gain: 0.001
   force_control_speed_limit: 0.003
   force_control_timeout: 2.0
   socket_depth_threshold: 0.002
-  insertion_force_drop_threshold: 1.5
 
 insert:
   insertion_depth: 0.01
@@ -56,12 +55,12 @@ insert:
   release_force_threshold: 2.0
 
 verify:
-  move_distance_y: 0.0001
-  move_distance_z: 0.0001
+  move_distance_y: 0.0002
+  move_distance_z: 0.0002
   move_speed: 0.002
   move_timeout: 2.0
-  counterforce_threshold_y: 5.0
-  counterforce_threshold_z: 5.0
+  counterforce_threshold_y: 2.0
+  counterforce_threshold_z: 2.0
   settle_time: 0.1
 
 gripper:
