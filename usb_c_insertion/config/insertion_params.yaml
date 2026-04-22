@@ -2,6 +2,7 @@ motion:
   probe_speed: 0.005
   retract_speed: 0.02
   search_speed: 0.003
+  search_traverse_speed: 0.012
   move_speed: 0.02
   max_linear_speed: 0.03
   max_angular_speed: 0.2
@@ -26,6 +27,7 @@ contact:
 
 probe:
   retract_distance: 0.005
+  inter_probe_backoff_distance: 0.01
   second_probe_y_offset: 0.02
   max_probe_distance: 0.1
   probe_timeout: 10.0
@@ -34,14 +36,14 @@ search:
   step_y: 0.0015
   step_z: 0.0015
   max_search_width: 0.015
-  max_search_height: 0.02  
+  max_search_height: 0.02
   search_timeout: 30.0
   contact_force_target: 2.0
   contact_force_tolerance: 0.5
   force_control_gain: 0.001
   force_control_speed_limit: 0.003
   force_control_timeout: 2.0
-  insertion_jump_distance: 0.002
+  socket_depth_threshold: 0.002
   insertion_force_drop_threshold: 1.5
 
 insert:

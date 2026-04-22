@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import List
 
 
@@ -77,6 +78,44 @@ def generate_expanding_square_pattern(step: float, max_radius: float) -> List[Pl
                 current_y = next_y
             if direction_y != 0.0:
                 leg_length += 1
+
+
+def generate_expanding_circle_pattern(
+    radial_step: float,
+    max_radius_x: float,
+    max_radius_y: float,
+) -> List[PlanarOffset]:
+    """
+    Generate an expanding circle-based pattern around the origin.
+
+    The pattern approximates growing circles clipped to the requested search
+    extents, which makes it more efficient than a raster for larger search
+    regions while remaining deterministic and easy to test.
+    """
+    if radial_step <= 0.0:
+        raise ValueError("radial_step must be positive")
+    if max_radius_x < 0.0 or max_radius_y < 0.0:
+        raise ValueError("max_radius_x and max_radius_y must be non-negative")
+    if max_radius_x == 0.0 and max_radius_y == 0.0:
+        return []
+
+    absolute_points = [(0.0, 0.0)]
+    max_radius = max(max_radius_x, max_radius_y)
+    radius = radial_step
+    while radius <= max_radius + 1e-9:
+        circumference = max(2.0 * math.pi * radius, radial_step)
+        point_count = max(12, int(math.ceil(circumference / radial_step)))
+        for index in range(point_count):
+            theta = (2.0 * math.pi * index) / float(point_count)
+            point_x = radius * math.cos(theta)
+            point_y = radius * math.sin(theta)
+            if abs(point_x) <= max_radius_x + 1e-9 and abs(point_y) <= max_radius_y + 1e-9:
+                rounded_point = (round(point_x, 10), round(point_y, 10))
+                if rounded_point != absolute_points[-1]:
+                    absolute_points.append(rounded_point)
+        radius += radial_step
+
+    return _to_incremental_offsets(absolute_points)
 
 
 def _to_incremental_offsets(absolute_points) -> List[PlanarOffset]:

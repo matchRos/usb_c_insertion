@@ -19,7 +19,7 @@ from ft_interface import FTInterface
 from insertion_controller import InsertionController
 from post_insertion_verifier import PostInsertionVerifier
 from robot_interface import RobotInterface
-from search_pattern import generate_raster_pattern
+from search_pattern import generate_expanding_circle_pattern
 from tf_interface import TFInterface
 from wall_frame_estimator import estimate_wall_yaw
 from wall_probe import ProbeResult, WallProbe
@@ -76,6 +76,7 @@ class InsertionStateMachine:
         self._move_speed = float(rospy.get_param("~motion/move_speed", 0.01))
         self._max_probe_distance = float(rospy.get_param("~probe/max_probe_distance", 0.05))
         self._probe_timeout = float(rospy.get_param("~probe/probe_timeout", 10.0))
+        self._inter_probe_backoff_distance = float(rospy.get_param("~probe/inter_probe_backoff_distance", 0.01))
         self._second_probe_y_offset = float(rospy.get_param("~probe/second_probe_y_offset", 0.02))
         self._retract_distance = float(rospy.get_param("~probe/retract_distance", 0.01))
         self._search_step_y = float(rospy.get_param("~search/step_y", 0.0015))
@@ -83,12 +84,13 @@ class InsertionStateMachine:
         self._search_width = float(rospy.get_param("~search/max_search_width", 0.01))
         self._search_height = float(rospy.get_param("~search/max_search_height", 0.01))
         self._search_timeout = float(rospy.get_param("~search/search_timeout", 20.0))
+        self._search_traverse_speed = float(rospy.get_param("~motion/search_traverse_speed", 0.012))
         self._search_contact_force_target = float(rospy.get_param("~search/contact_force_target", 4.0))
         self._search_contact_force_tolerance = float(rospy.get_param("~search/contact_force_tolerance", 0.5))
         self._search_force_control_gain = float(rospy.get_param("~search/force_control_gain", 0.001))
         self._search_force_control_speed_limit = float(rospy.get_param("~search/force_control_speed_limit", 0.002))
         self._search_force_control_timeout = float(rospy.get_param("~search/force_control_timeout", 2.0))
-        self._insertion_jump_distance = float(rospy.get_param("~search/insertion_jump_distance", 0.002))
+        self._search_socket_depth_threshold = float(rospy.get_param("~search/socket_depth_threshold", 0.002))
         self._insertion_force_drop_threshold = float(rospy.get_param("~search/insertion_force_drop_threshold", 1.5))
         self._force_threshold_x = float(rospy.get_param("~contact/force_threshold_x", 4.0))
         self._force_threshold_norm = float(rospy.get_param("~contact/force_threshold_norm", 5.0))
@@ -229,10 +231,22 @@ class InsertionStateMachine:
 
     def _handle_probe_wall_point_2(self) -> None:
         target_orientation = self._compute_tcp_target_orientation()
-        second_probe_target_x, second_probe_target_y, second_probe_target_z = self._compute_port_frame_target(
-            self._prepose_offset_port_x,
-            0.5 * self._second_probe_y_offset,
-            self._prepose_offset_port_z,
+        probe_direction = self._normalize_vector(self._compute_port_frame_direction(1.0, 0.0, 0.0))
+        lateral_offset = self._compute_port_frame_direction(0.0, self._second_probe_y_offset, 0.0)
+        second_probe_target_x = (
+            self._probe_result_1.contact_point.point.x
+            - probe_direction[0] * self._inter_probe_backoff_distance
+            + lateral_offset[0]
+        )
+        second_probe_target_y = (
+            self._probe_result_1.contact_point.point.y
+            - probe_direction[1] * self._inter_probe_backoff_distance
+            + lateral_offset[1]
+        )
+        second_probe_target_z = (
+            self._probe_result_1.contact_point.point.z
+            - probe_direction[2] * self._inter_probe_backoff_distance
+            + lateral_offset[2]
         )
 
         success = self._move_to_xyz(
@@ -248,7 +262,6 @@ class InsertionStateMachine:
             self._fail("move_to_second_probe_offset_failed")
             return
 
-        probe_direction = self._compute_port_frame_direction(1.0, 0.0, 0.0)
         contact_axis = self._dominant_axis_name(probe_direction)
         self._probe_result_2 = self._wall_probe.probe_until_contact(
             direction_xyz=probe_direction,
@@ -348,11 +361,10 @@ class InsertionStateMachine:
             return
 
         started_at = rospy.Time.now()
-        pattern = generate_raster_pattern(
-            step_x=self._search_step_y,
-            step_y=self._search_step_z,
-            width=self._search_width,
-            height=self._search_height,
+        pattern = generate_expanding_circle_pattern(
+            radial_step=min(self._search_step_y, self._search_step_z),
+            max_radius_x=0.5 * self._search_width,
+            max_radius_y=0.5 * self._search_height,
         )
         current_pose = self._tf.get_tool_pose_in_base()
         if current_pose is None:
@@ -384,14 +396,13 @@ class InsertionStateMachine:
             current_y += offset.dx * wall_y
             current_z += offset.dy
 
-            if not self._move_to_xyz(
+            if not self._move_linear_to_xyz(
                 current_x,
                 current_y,
                 current_z,
-                speed=self._search_speed,
+                speed=self._search_traverse_speed,
                 timeout=4.0,
                 move_name="search_step",
-                target_orientation=search_orientation,
             ):
                 self._fail("search_motion_failed")
                 return
@@ -405,7 +416,7 @@ class InsertionStateMachine:
                 self._fail("search_force_control_failed")
                 return
 
-            if self._detect_insertion_event():
+            if self._is_socket_depth_reached():
                 self._advance(InsertionState.INSERT_CABLE)
                 return
 
@@ -563,6 +574,70 @@ class InsertionStateMachine:
         self._robot.stop_motion()
         return False
 
+    def _move_linear_to_xyz(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        speed: float,
+        timeout: float,
+        move_name: str,
+    ) -> bool:
+        deadline = rospy.Time.now() + rospy.Duration.from_sec(timeout)
+        rate = rospy.Rate(max(1.0, self._command_rate))
+
+        while not rospy.is_shutdown():
+            if rospy.Time.now() > deadline:
+                pose = self._tf.get_tool_pose_in_base()
+                self._robot.stop_motion()
+                if pose is None:
+                    self._log("err", "move_timeout", move=move_name, reason="missing_tf_on_timeout")
+                else:
+                    remaining_distance = math.sqrt(
+                        (x - pose.pose.position.x) ** 2
+                        + (y - pose.pose.position.y) ** 2
+                        + (z - pose.pose.position.z) ** 2
+                    )
+                    self._log(
+                        "err",
+                        "move_timeout",
+                        move=move_name,
+                        current_x=round(pose.pose.position.x, 4),
+                        current_y=round(pose.pose.position.y, 4),
+                        current_z=round(pose.pose.position.z, 4),
+                        remaining_distance=round(remaining_distance, 4),
+                    )
+                return False
+
+            pose = self._tf.get_tool_pose_in_base()
+            if pose is None:
+                self._robot.stop_motion()
+                self._log("err", "move_missing_tf", move=move_name)
+                return False
+
+            error_x = x - pose.pose.position.x
+            error_y = y - pose.pose.position.y
+            error_z = z - pose.pose.position.z
+            distance = math.sqrt(error_x * error_x + error_y * error_y + error_z * error_z)
+            if distance <= self._position_tolerance:
+                self._robot.stop_motion()
+                return True
+
+            limited_speed = min(max(0.0, speed), distance / max(1.0 / self._command_rate, 1e-3))
+            direction_scale = limited_speed / max(distance, 1e-9)
+            self._robot.send_twist(
+                error_x * direction_scale,
+                error_y * direction_scale,
+                error_z * direction_scale,
+                0.0,
+                0.0,
+                0.0,
+            )
+            rate.sleep()
+
+        self._robot.stop_motion()
+        return False
+
     def _align_yaw(self, target_yaw: float, timeout: float) -> bool:
         current_pose = self._tf.get_tool_pose_in_base()
         if current_pose is None:
@@ -631,15 +706,6 @@ class InsertionStateMachine:
 
             contact_force = self._get_search_contact_force()
             force_error = target_force - contact_force
-            if self._detect_insertion_event():
-                self._robot.stop_motion()
-                self._log(
-                    "info",
-                    "force_control_insertion_event",
-                    contact_force=round(contact_force, 3),
-                )
-                return True
-
             if abs(force_error) <= tolerance:
                 self._robot.stop_motion()
                 return True
@@ -661,7 +727,7 @@ class InsertionStateMachine:
         self._robot.stop_motion()
         return False
 
-    def _detect_insertion_event(self) -> bool:
+    def _is_socket_depth_reached(self) -> bool:
         pose = self._tf.get_tool_pose_in_base()
         if pose is None:
             return False
@@ -670,12 +736,7 @@ class InsertionStateMachine:
             pose.pose.position.y,
             pose.pose.position.z,
         )
-        contact_force = self._get_search_contact_force()
-        force_drop = self._search_contact_force_target - contact_force
-        return (
-            inserted_depth >= self._insertion_jump_distance
-            and force_drop >= self._insertion_force_drop_threshold
-        )
+        return inserted_depth >= self._search_socket_depth_threshold
 
     def _get_search_contact_force(self) -> float:
         wrench = self._ft.get_filtered_wrench()
