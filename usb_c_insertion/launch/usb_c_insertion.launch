@@ -1,7 +1,7 @@
 <launch>
-  <arg name="port_x" default="0.611" />
+  <arg name="port_x" default="0.608" />
   <arg name="port_y" default="-0.095" />
-  <arg name="port_z" default="0.241" />
+  <arg name="port_z" default="0.247" />
 
   <arg name="port_qx" default="0.000" />
   <arg name="port_qy" default="0.000" />
@@ -9,14 +9,14 @@
   <arg name="port_qw" default="0.7071" />
 
   <arg name="auto_zero_ft" default="false" />
-  <arg name="stop_after_state" default="SEARCH_FOR_PORT" />
+  <arg name="stop_after_state" default="" />
   <arg name="prepose_offset_port_x" default="-0.030" />
   <arg name="prepose_offset_port_y" default="0.000" />
   <arg name="prepose_offset_port_z" default="0.000" />
   <arg name="precontact_offset_port_x" default="-0.010" />
   <arg name="precontact_offset_port_y" default="0.000" />
   <arg name="precontact_offset_port_z" default="0.000" />
-  <arg name="prepose_speed" default="0.010" />
+  <arg name="prepose_speed" default="0.015" />
   <arg name="prepose_timeout" default="30.0" />
   <arg name="position_tolerance" default="0.002" />
 

@@ -16,6 +16,7 @@ if SCRIPT_DIR not in sys.path:
 
 from contact_detector import ContactDetector
 from ft_interface import FTInterface
+from insertion_controller import InsertionController
 from robot_interface import RobotInterface
 from search_pattern import generate_raster_pattern
 from tf_interface import TFInterface
@@ -34,6 +35,7 @@ class InsertionState(Enum):
     MOVE_TO_PORT_PRECONTACT = "MOVE_TO_PORT_PRECONTACT"
     APPROACH_WALL_NEAR_PORT = "APPROACH_WALL_NEAR_PORT"
     SEARCH_FOR_PORT = "SEARCH_FOR_PORT"
+    INSERT_CABLE = "INSERT_CABLE"
     CHECK_INSERTION = "CHECK_INSERTION"
     SUCCESS = "SUCCESS"
     FAILURE = "FAILURE"
@@ -63,6 +65,7 @@ class InsertionStateMachine:
             hysteresis=rospy.get_param("~contact/hysteresis", 0.5),
         )
         self._wall_probe = WallProbe(self._robot, self._tf, self._contact_detector)
+        self._insertion_controller = InsertionController(self._robot, self._tf, self._ft)
 
         self._command_rate = float(rospy.get_param("~motion/command_rate", 100.0))
         self._probe_speed = float(rospy.get_param("~motion/probe_speed", 0.003))
@@ -107,8 +110,6 @@ class InsertionStateMachine:
         self._yaw_alignment_gain = float(rospy.get_param("~state_machine/yaw_alignment_gain", 0.8))
         self._yaw_tolerance = float(rospy.get_param("~state_machine/yaw_tolerance", 0.03))
         self._position_tolerance = float(rospy.get_param("~state_machine/position_tolerance", 0.002))
-        self._insertion_depth = float(rospy.get_param("~state_machine/insertion_depth", 0.004))
-
         self._probe_result_1: Optional[ProbeResult] = None
         self._probe_result_2: Optional[ProbeResult] = None
         self._wall_estimate = None
@@ -145,6 +146,8 @@ class InsertionStateMachine:
                 self._handle_approach_wall_near_port()
             elif self._state == InsertionState.SEARCH_FOR_PORT:
                 self._handle_search_for_port()
+            elif self._state == InsertionState.INSERT_CABLE:
+                self._handle_insert_cable()
             elif self._state == InsertionState.CHECK_INSERTION:
                 self._handle_check_insertion()
             elif self._state == InsertionState.SUCCESS:
@@ -472,31 +475,55 @@ class InsertionStateMachine:
                 return
 
             if self._detect_insertion_event():
-                self._advance(InsertionState.CHECK_INSERTION)
+                self._advance(InsertionState.INSERT_CABLE)
                 return
 
         self._fail("search_pattern_exhausted")
+
+    def _handle_insert_cable(self) -> None:
+        if self._search_reference_point is None or self._search_probe_direction is None:
+            self._fail("missing_insert_context")
+            return
+
+        result = self._insertion_controller.insert_until_depth(
+            self._search_reference_point,
+            self._search_probe_direction,
+        )
+        if not result.success:
+            self._fail("insert_cable_failed: %s" % result.reason)
+            return
+
+        self._advance(InsertionState.CHECK_INSERTION)
 
     def _handle_check_insertion(self) -> None:
         if self._last_search_reference_x is None:
             self._fail("missing_insertion_reference")
             return
 
-        pose = self._tf.get_tool_pose_in_base()
-        if pose is None:
+        result = self._insertion_controller.check_insertion(
+            self._search_reference_point,
+            self._search_probe_direction,
+        )
+        if result.reason == "missing_tf":
             self._fail("missing_tf_for_insertion_check")
             return
 
-        inserted_depth = self._project_displacement_from_reference(
-            pose.pose.position.x,
-            pose.pose.position.y,
-            pose.pose.position.z,
-        )
-        contact_force = self._get_search_contact_force()
-        force_drop = self._search_contact_force_target - contact_force
-        if inserted_depth >= self._insertion_depth and force_drop >= self._insertion_force_drop_threshold:
+        if result.success:
+            self._log(
+                "info",
+                "insertion_check_passed",
+                inserted_depth=round(result.inserted_depth, 4),
+                contact_force=round(result.contact_force, 3),
+            )
             self._advance(InsertionState.SUCCESS)
         else:
+            self._log(
+                "err",
+                "insertion_check_failed",
+                inserted_depth=round(result.inserted_depth, 4),
+                contact_force=round(result.contact_force, 3),
+                reason=result.reason,
+            )
             self._fail("insertion_check_failed")
 
     def _move_to_xyz(
