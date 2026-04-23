@@ -15,12 +15,14 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from contact_detector import ContactDetector
+from extraction_controller import ExtractionController
 from ft_interface import FTInterface
 from insertion_controller import InsertionController
 from post_insertion_verifier import PostInsertionVerifier
 from robot_interface import RobotInterface
 from search_pattern import generate_raster_pattern
 from tf_interface import TFInterface
+from vision_pose_loader import load_vision_pose_from_json
 from wall_frame_estimator import estimate_wall_yaw
 from wall_probe import ProbeResult, WallProbe
 
@@ -39,6 +41,7 @@ class InsertionState(Enum):
     INSERT_CABLE = "INSERT_CABLE"
     CHECK_INSERTION = "CHECK_INSERTION"
     VERIFY_INSERTION = "VERIFY_INSERTION"
+    EXTRACT_CABLE = "EXTRACT_CABLE"
     SUCCESS = "SUCCESS"
     FAILURE = "FAILURE"
 
@@ -69,6 +72,7 @@ class InsertionStateMachine:
         self._wall_probe = WallProbe(self._robot, self._tf, self._contact_detector)
         self._insertion_controller = InsertionController(self._robot, self._tf, self._ft)
         self._post_insertion_verifier = PostInsertionVerifier(self._robot, self._tf, self._ft)
+        self._extraction_controller = ExtractionController(self._robot, self._tf, self._ft)
 
         self._command_rate = float(rospy.get_param("~motion/command_rate", 100.0))
         self._probe_speed = float(rospy.get_param("~motion/probe_speed", 0.003))
@@ -103,6 +107,7 @@ class InsertionStateMachine:
         self._port_qy = float(rospy.get_param("~port_estimate/qy", 0.0))
         self._port_qz = float(rospy.get_param("~port_estimate/qz", 0.0))
         self._port_qw = float(rospy.get_param("~port_estimate/qw", 1.0))
+        self._vision_pose_json_path = str(rospy.get_param("~vision_pose_json_path", "")).strip()
         self._prepose_offset_port_x = float(rospy.get_param("~state_machine/prepose_offset_port_x", -0.05))
         self._prepose_offset_port_y = float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0))
         self._prepose_offset_port_z = float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0))
@@ -120,6 +125,8 @@ class InsertionStateMachine:
         self._last_search_reference_x: Optional[float] = None
         self._search_reference_point = None
         self._search_probe_direction = None
+
+        self._load_port_estimate()
 
         rospy.on_shutdown(self._robot.stop_motion)
 
@@ -156,6 +163,8 @@ class InsertionStateMachine:
                 self._handle_check_insertion()
             elif self._state == InsertionState.VERIFY_INSERTION:
                 self._handle_verify_insertion()
+            elif self._state == InsertionState.EXTRACT_CABLE:
+                self._handle_extract_cable()
             elif self._state == InsertionState.SUCCESS:
                 self._robot.stop_motion()
                 self._log("info", "run_complete", result="success")
@@ -173,6 +182,38 @@ class InsertionStateMachine:
             self._fail("zero_ft_failed")
             return
         self._advance(InsertionState.MOVE_TO_PREPOSE)
+
+    def _load_port_estimate(self) -> None:
+        if not self._vision_pose_json_path:
+            return
+
+        try:
+            vision_pose = load_vision_pose_from_json(self._vision_pose_json_path)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            self._log(
+                "warn",
+                "vision_pose_load_failed",
+                path=self._vision_pose_json_path,
+                reason=str(exc),
+            )
+            return
+
+        self._port_x = vision_pose.x
+        self._port_y = vision_pose.y
+        self._port_z = vision_pose.z
+        self._port_qx = vision_pose.qx
+        self._port_qy = vision_pose.qy
+        self._port_qz = vision_pose.qz
+        self._port_qw = vision_pose.qw
+        self._log(
+            "info",
+            "vision_pose_loaded",
+            path=self._vision_pose_json_path,
+            x=round(self._port_x, 4),
+            y=round(self._port_y, 4),
+            z=round(self._port_z, 4),
+            yaw_rad=round(vision_pose.yaw_rad, 4),
+        )
 
     def _handle_move_to_prepose(self) -> None:
         target_x, target_y, target_z = self._compute_port_frame_target(
@@ -470,16 +511,15 @@ class InsertionStateMachine:
             self._fail("insertion_check_failed")
 
     def _handle_verify_insertion(self) -> None:
-        result = self._post_insertion_verifier.verify_and_release()
+        result = self._post_insertion_verifier.verify_retention()
         if result.success:
             self._log(
                 "info",
                 "post_insertion_verified",
                 counterforce_y=round(result.counterforce_y, 3),
                 counterforce_z=round(result.counterforce_z, 3),
-                gripper_opened=str(result.gripper_opened).lower(),
             )
-            self._advance(InsertionState.SUCCESS)
+            self._advance(InsertionState.EXTRACT_CABLE)
             return
 
         self._log(
@@ -490,6 +530,32 @@ class InsertionStateMachine:
             counterforce_z=round(result.counterforce_z, 3),
         )
         self._fail("post_insertion_verification_failed")
+
+    def _handle_extract_cable(self) -> None:
+        result = self._extraction_controller.extract()
+        if result.success:
+            self._log(
+                "info",
+                "cable_extracted",
+                extracted_distance=round(result.extracted_distance, 4),
+                pull_force=round(result.pull_force, 3),
+                lateral_force=round(result.lateral_force, 3),
+                torque_norm=round(result.torque_norm, 3),
+                gripper_opened=str(result.gripper_opened).lower(),
+            )
+            self._advance(InsertionState.SUCCESS)
+            return
+
+        self._log(
+            "err",
+            "cable_extraction_failed",
+            reason=result.reason,
+            extracted_distance=round(result.extracted_distance, 4),
+            pull_force=round(result.pull_force, 3),
+            lateral_force=round(result.lateral_force, 3),
+            torque_norm=round(result.torque_norm, 3),
+        )
+        self._fail("cable_extraction_failed")
 
     def _move_to_xyz(
         self,
@@ -693,11 +759,53 @@ class InsertionStateMachine:
         deadline = rospy.Time.now() + rospy.Duration.from_sec(timeout)
         rate = rospy.Rate(max(1.0, self._command_rate))
         direction = self._normalize_vector(direction_xyz)
+        start_time = rospy.Time.now()
+        last_progress_log_time = rospy.Time(0)
+
+        start_pose = self._tf.get_tool_pose_in_base()
+        start_force = self._get_search_contact_force()
+        if start_pose is not None:
+            self._log(
+                "info",
+                "force_control_start",
+                target_force=round(target_force, 3),
+                start_force=round(start_force, 3),
+                start_x=round(start_pose.pose.position.x, 4),
+                start_y=round(start_pose.pose.position.y, 4),
+                start_z=round(start_pose.pose.position.z, 4),
+                timeout=round(timeout, 2),
+            )
 
         while not rospy.is_shutdown():
             if rospy.Time.now() > deadline:
+                pose = self._tf.get_tool_pose_in_base()
+                current_force = self._get_search_contact_force()
                 self._robot.stop_motion()
-                self._log("err", "force_control_timeout", target_force=round(target_force, 3))
+                if pose is None:
+                    self._log(
+                        "err",
+                        "force_control_timeout",
+                        target_force=round(target_force, 3),
+                        current_force=round(current_force, 3),
+                        reason="missing_tf_on_timeout",
+                    )
+                else:
+                    inserted_depth = self._project_displacement_from_reference(
+                        pose.pose.position.x,
+                        pose.pose.position.y,
+                        pose.pose.position.z,
+                    )
+                    self._log(
+                        "err",
+                        "force_control_timeout",
+                        target_force=round(target_force, 3),
+                        current_force=round(current_force, 3),
+                        inserted_depth=round(inserted_depth, 4),
+                        current_x=round(pose.pose.position.x, 4),
+                        current_y=round(pose.pose.position.y, 4),
+                        current_z=round(pose.pose.position.z, 4),
+                        elapsed=round((rospy.Time.now() - start_time).to_sec(), 2),
+                    )
                 return False
             if self._ft.is_wrench_stale():
                 self._robot.stop_motion()
@@ -708,12 +816,56 @@ class InsertionStateMachine:
             force_error = target_force - contact_force
             if abs(force_error) <= tolerance:
                 self._robot.stop_motion()
+                pose = self._tf.get_tool_pose_in_base()
+                if pose is not None:
+                    inserted_depth = self._project_displacement_from_reference(
+                        pose.pose.position.x,
+                        pose.pose.position.y,
+                        pose.pose.position.z,
+                    )
+                    self._log(
+                        "info",
+                        "force_control_reached",
+                        target_force=round(target_force, 3),
+                        current_force=round(contact_force, 3),
+                        inserted_depth=round(inserted_depth, 4),
+                        elapsed=round((rospy.Time.now() - start_time).to_sec(), 2),
+                    )
                 return True
 
             speed = max(
                 -self._search_force_control_speed_limit,
                 min(self._search_force_control_speed_limit, self._search_force_control_gain * force_error),
             )
+            now = rospy.Time.now()
+            if last_progress_log_time == rospy.Time(0) or (now - last_progress_log_time).to_sec() >= 0.5:
+                pose = self._tf.get_tool_pose_in_base()
+                if pose is not None:
+                    inserted_depth = self._project_displacement_from_reference(
+                        pose.pose.position.x,
+                        pose.pose.position.y,
+                        pose.pose.position.z,
+                    )
+                    self._log(
+                        "info",
+                        "force_control_progress",
+                        target_force=round(target_force, 3),
+                        current_force=round(contact_force, 3),
+                        force_error=round(force_error, 3),
+                        command_speed=round(speed, 4),
+                        inserted_depth=round(inserted_depth, 4),
+                    )
+                else:
+                    self._log(
+                        "info",
+                        "force_control_progress",
+                        target_force=round(target_force, 3),
+                        current_force=round(contact_force, 3),
+                        force_error=round(force_error, 3),
+                        command_speed=round(speed, 4),
+                        inserted_depth="missing_tf",
+                    )
+                last_progress_log_time = now
             self._robot.send_twist(
                 direction[0] * speed,
                 direction[1] * speed,

@@ -5,7 +5,7 @@ ROS1 Noetic package for force-guided USB-C cable insertion with a UR5e.
 ## Main interfaces
 - Motion command: `/twist_controller/command`
 - Force/torque: `/wrench`
-- Tool pose: TF from `base_link` to `tool0`
+- Tool pose: TF from `base_link` to `tool0_controller`
 
 ## Architecture
 - `robot_interface.py`: motion command abstraction

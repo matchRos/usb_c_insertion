@@ -55,13 +55,28 @@ insert:
   release_force_threshold: 2.0
 
 verify:
-  move_distance_y: 0.0002
-  move_distance_z: 0.0002
+  move_distance_y: 0.00025
+  move_distance_z: 0.00025
   move_speed: 0.002
   move_timeout: 2.0
-  counterforce_threshold_y: 2.0
-  counterforce_threshold_z: 2.0
+  counterforce_threshold_y: 1.0
+  counterforce_threshold_z: 1.0
   settle_time: 0.1
+
+extract:
+  distance: 0.02
+  pull_force_target: 8.0
+  pull_force_tolerance: 1.0
+  pull_force_gain: 0.001
+  max_pull_speed: 0.006
+  tool_z_direction_sign: -1.0
+  wiggle_speed_y: 0.002
+  wiggle_speed_z: 0.0
+  wiggle_frequency: 2.0
+  timeout: 8.0
+  max_lateral_force: 25.0
+  max_torque_norm: 3.0
+  release_after_extract: true
 
 gripper:
   open_via_script_command: false

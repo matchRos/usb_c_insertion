@@ -9,14 +9,14 @@ Automate insertion of a USB-C cable into a USB-C PCIe expansion card mounted in 
 - UR5e robot
 - Cartesian velocity control via `/twist_controller/command`
 - Force/torque input via `/wrench`
-- Tool pose from TF: `base_link -> tool0`
+- Tool pose from TF: `base_link -> tool0_controller`
 - English comments only
 
 ## Available ROS interfaces
 - Motion command: `/twist_controller/command`
 - Force/torque: `/wrench`
 - Optional FT zeroing service: `/ur_hardware_interface/zero_ftsensor`
-- Pose must be obtained via TF between `base_link` and `tool0`
+- Pose must be obtained via TF between `base_link` and `tool0_controller`
 
 ## Current assumptions
 - Initial coarse port pose is provided in `base_link`

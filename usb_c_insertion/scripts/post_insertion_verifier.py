@@ -25,7 +25,6 @@ class PostInsertionVerificationResult:
     reason: str
     counterforce_y: float
     counterforce_z: float
-    gripper_opened: bool
 
 
 class PostInsertionVerifier:
@@ -56,15 +55,15 @@ class PostInsertionVerifier:
         self._counterforce_threshold_z = float(rospy.get_param("~verify/counterforce_threshold_z", 5.0))
         self._settle_time = float(rospy.get_param("~verify/settle_time", 0.1))
 
-    def verify_and_release(self) -> PostInsertionVerificationResult:
+    def verify_retention(self) -> PostInsertionVerificationResult:
         """
-        Run the retention check and open the gripper if it passes.
+        Run the retention check while keeping the gripper closed.
         """
         start_pose = self._tf.get_tool_pose_in_base()
         if start_pose is None:
-            return PostInsertionVerificationResult(False, "missing_initial_tf", 0.0, 0.0, False)
+            return PostInsertionVerificationResult(False, "missing_initial_tf", 0.0, 0.0)
         if self._ft.is_wrench_stale():
-            return PostInsertionVerificationResult(False, "stale_wrench", 0.0, 0.0, False)
+            return PostInsertionVerificationResult(False, "stale_wrench", 0.0, 0.0)
 
         baseline = self._ft.get_filtered_wrench()
         counterforce_y, y_ok = self._probe_counterforce(
@@ -76,7 +75,7 @@ class PostInsertionVerifier:
             move_name="verify_retention_y",
         )
         if not y_ok:
-            return PostInsertionVerificationResult(False, "counterforce_y_not_detected", counterforce_y, 0.0, False)
+            return PostInsertionVerificationResult(False, "counterforce_y_not_detected", counterforce_y, 0.0)
 
         counterforce_z, z_ok = self._probe_counterforce(
             reference_pose=start_pose,
@@ -87,13 +86,9 @@ class PostInsertionVerifier:
             move_name="verify_retention_z",
         )
         if not z_ok:
-            return PostInsertionVerificationResult(False, "counterforce_z_not_detected", counterforce_y, counterforce_z, False)
+            return PostInsertionVerificationResult(False, "counterforce_z_not_detected", counterforce_y, counterforce_z)
 
-        gripper_opened = self._robot.open_gripper()
-        if not gripper_opened:
-            return PostInsertionVerificationResult(False, "gripper_open_failed", counterforce_y, counterforce_z, False)
-
-        return PostInsertionVerificationResult(True, "verified_and_released", counterforce_y, counterforce_z, True)
+        return PostInsertionVerificationResult(True, "verified", counterforce_y, counterforce_z)
 
     def _probe_counterforce(
         self,
