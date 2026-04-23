@@ -1,9 +1,24 @@
 <?xml version="1.0"?>
 <launch>
+    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml"/>
+    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml"/>
+
     <include file="$(find ur_robot_driver)/launch/ur5e_bringup.launch">
         <arg name="robot_ip" value="ur"/>
         <arg name="kinematics_config" value="$(find usb_c_insertion)/config/ur5e_robot_calibration.yaml"/>
     </include>
+
+    <node
+        pkg="tf"
+        type="static_transform_publisher"
+        name="zed_camera_static_tf"
+        args="-0.18846434 0.00467202 -0.05067501 -0.06574323 0.17529774 -0.17568901 0.96647913 tool0 zedm_left_camera_optical_frame 100"/>
+
+    <node name="camera_pose_publisher" pkg="usb_c_insertion" type="camera_pose_publisher.py" output="screen">
+        <param name="camera_frame" value="zedm_left_camera_optical_frame"/>
+        <param name="camera_pose_publish_rate" value="10.0"/>
+    </node>
+
     <node name="enable_ur" pkg="usb_c_insertion" type="enable_ur.py" output="screen">
         <param name="startup_timeout" value="10.0"/>
     </node>

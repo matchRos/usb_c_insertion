@@ -6,3 +6,4 @@ topics:
   wrench: "/wrench"
   script_command: "/ur_hardware_interface/script_command"
   vision_pose_debug: "/usb_c_insertion/vision_pose_debug"
+  camera_pose_debug: "/usb_c_insertion/camera_pose"
