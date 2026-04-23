@@ -1,0 +1,15 @@
+geometry_msgs/PoseStamped target_pose
+float32 position_tolerance
+float32 orientation_tolerance
+float32 settle_time
+float32 timeout
+---
+bool success
+string message
+geometry_msgs/PoseStamped final_pose
+---
+geometry_msgs/PoseStamped current_pose
+float32 position_error
+float32 orientation_error
+bool reached_position
+bool reached_orientation

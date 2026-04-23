@@ -33,7 +33,10 @@ def load_vision_pose_from_json(json_path: str) -> VisionPose:
         data = json.load(handle)
 
     position = _require_mapping(data, "position")
-    yaw_rad = _normalize_angle(_extract_yaw_rad(data) + YAW_OFFSET_RAD)
+    # The vision pipeline reports the case yaw with the opposite sign relative
+    # to the robot-side convention used by the insertion stack, so invert it
+    # before applying the fixed frame offset.
+    yaw_rad = _normalize_angle((-_extract_yaw_rad(data)) + YAW_OFFSET_RAD)
     qx, qy, qz, qw = _quaternion_from_yaw(yaw_rad)
     transformed_x, transformed_y, transformed_z = _transform_position_axes(
         float(position["x"]),

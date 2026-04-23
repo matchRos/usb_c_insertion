@@ -35,6 +35,7 @@ class TwistControllerNode:
 
         self._publisher = rospy.Publisher(self._output_topic, Twist, queue_size=10)
         self._subscriber = rospy.Subscriber(self._input_topic, Twist, self._command_callback, queue_size=10)
+        rospy.on_shutdown(self._handle_shutdown)
 
     def spin(self) -> None:
         rate = rospy.Rate(max(1.0, self._command_rate))
@@ -141,6 +142,19 @@ class TwistControllerNode:
         converted.angular.y = -twist.angular.y
         converted.angular.z = twist.angular.z
         return converted
+
+    def _handle_shutdown(self) -> None:
+        """
+        Publish explicit zero commands during shutdown so the robot stops.
+
+        The watchdog usually catches missing commands, but sending a final stop
+        command here reduces the chance of a short residual motion if this node
+        is terminated while non-zero twists are still buffered downstream.
+        """
+        zero_twist = self._to_controller_frame(Twist())
+        for _ in range(10):
+            self._publisher.publish(zero_twist)
+            rospy.sleep(0.01)
 
 
 def main() -> None:

@@ -7,8 +7,9 @@
   <arg name="port_qy" default="0.000" />
   <arg name="port_qz" default="-0.7071" />
   <arg name="port_qw" default="0.7071" />
-  <arg name="vision_pose_json_path" default="$(find usb_c_insertion)/config/white_tape_location.json" />
+  <arg name="vision_pose_json_path" default="/tmp/green_sticker_location.json" />
   <arg name="publish_vision_pose_only" default="false" />
+  <arg name="start_state_machine" default="false" />
 
   <arg name="auto_zero_ft" default="false" />
   <arg name="stop_after_state" default="" />
@@ -21,11 +22,12 @@
   <arg name="prepose_speed" default="0.015" />
   <arg name="prepose_timeout" default="30.0" />
   <arg name="position_tolerance" default="0.002" />
+  <arg name="run_vision_script_path" default="$(find usb_c_insertion)/scripts/run_vision.sh" />
 
   <node unless="$(arg publish_vision_pose_only)"
         pkg="usb_c_insertion"
-        type="twist_controller_node.py"
-        name="usb_c_insertion_twist_controller"
+        type="move_to_pose_action_server.py"
+        name="usb_c_insertion_move_to_pose_action_server"
         output="screen">
     <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
     <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
@@ -34,12 +36,22 @@
 
   <node unless="$(arg publish_vision_pose_only)"
         pkg="usb_c_insertion"
-        type="pose_servo_node.py"
-        name="usb_c_insertion_pose_servo"
+        type="compute_prepose_service.py"
+        name="usb_c_insertion_compute_prepose_service"
         output="screen">
     <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
     <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
     <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+  </node>
+
+  <node unless="$(arg publish_vision_pose_only)"
+        pkg="usb_c_insertion"
+        type="run_vision_service.py"
+        name="usb_c_insertion_run_vision_service"
+        output="screen">
+    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
+    <param name="run_vision_script_path" value="$(arg run_vision_script_path)" />
+    <param name="vision_pose_json_path" value="$(arg vision_pose_json_path)" />
   </node>
 
   <node if="$(arg publish_vision_pose_only)"
@@ -53,7 +65,7 @@
     <param name="vision_pose_json_path" value="$(arg vision_pose_json_path)" />
   </node>
 
-  <node unless="$(arg publish_vision_pose_only)"
+  <node if="$(eval (arg('publish_vision_pose_only') == 'false') and (arg('start_state_machine') == 'true'))"
         pkg="usb_c_insertion"
         type="insertion_state_machine.py"
         name="usb_c_insertion_state_machine"
