@@ -950,26 +950,34 @@ class InsertionStateMachine:
 
     def _compute_tcp_target_orientation(self):
         """
-        Build the desired TCP orientation from the PC frame orientation.
+        Build the desired TCP yaw from the perceived case plane.
 
-        Required convention:
-        - z_tcp points along +x_pc
-        - y_tcp points along +z_pc
-        - x_tcp follows from the right-handed frame, which yields +y_pc
+        The plane x-axis points out of the case wall. For the approach pose we
+        use that projected direction directly as the TCP x-axis yaw reference
+        in the robot XY plane. Only the yaw around robot z matters here.
         """
-        tcp_in_pc = self._quaternion_from_rotation_matrix(
-            (
-                (0.0, 0.0, 1.0),
-                (1.0, 0.0, 0.0),
-                (0.0, 1.0, 0.0),
+        current_pose = self._tf.get_tool_pose_in_base()
+        if current_pose is None:
+            return (
+                self._port_qx,
+                self._port_qy,
+                self._port_qz,
+                self._port_qw,
             )
+
+        plane_x_in_base = self._rotate_vector_by_quaternion(
+            1.0,
+            0.0,
+            0.0,
+            self._port_qx,
+            self._port_qy,
+            self._port_qz,
+            self._port_qw,
         )
-        return self._normalize_quaternion(
-            self._quaternion_multiply(
-                (self._port_qx, self._port_qy, self._port_qz, self._port_qw),
-                tcp_in_pc,
-            )
-        )
+        plane_x_yaw = math.atan2(plane_x_in_base[1], plane_x_in_base[0])
+        tcp_x_yaw = self._normalize_angle(plane_x_yaw)
+        current_roll, current_pitch, _ = self._euler_from_quaternion(current_pose.pose.orientation)
+        return self._quaternion_from_euler(current_roll, current_pitch, tcp_x_yaw)
 
     def _fail(self, reason: str) -> None:
         self._failure_reason = reason
@@ -983,6 +991,43 @@ class InsertionStateMachine:
         siny_cosp = 2.0 * (quaternion.w * quaternion.z + quaternion.x * quaternion.y)
         cosy_cosp = 1.0 - 2.0 * (quaternion.y * quaternion.y + quaternion.z * quaternion.z)
         return math.atan2(siny_cosp, cosy_cosp)
+
+    @staticmethod
+    def _euler_from_quaternion(quaternion):
+        sinr_cosp = 2.0 * (quaternion.w * quaternion.x + quaternion.y * quaternion.z)
+        cosr_cosp = 1.0 - 2.0 * (quaternion.x * quaternion.x + quaternion.y * quaternion.y)
+        roll = math.atan2(sinr_cosp, cosr_cosp)
+
+        sinp = 2.0 * (quaternion.w * quaternion.y - quaternion.z * quaternion.x)
+        if abs(sinp) >= 1.0:
+            pitch = math.copysign(0.5 * math.pi, sinp)
+        else:
+            pitch = math.asin(sinp)
+
+        siny_cosp = 2.0 * (quaternion.w * quaternion.z + quaternion.x * quaternion.y)
+        cosy_cosp = 1.0 - 2.0 * (quaternion.y * quaternion.y + quaternion.z * quaternion.z)
+        yaw = math.atan2(siny_cosp, cosy_cosp)
+        return (roll, pitch, yaw)
+
+    @staticmethod
+    def _quaternion_from_euler(roll: float, pitch: float, yaw: float):
+        half_roll = 0.5 * roll
+        half_pitch = 0.5 * pitch
+        half_yaw = 0.5 * yaw
+
+        sin_roll = math.sin(half_roll)
+        cos_roll = math.cos(half_roll)
+        sin_pitch = math.sin(half_pitch)
+        cos_pitch = math.cos(half_pitch)
+        sin_yaw = math.sin(half_yaw)
+        cos_yaw = math.cos(half_yaw)
+
+        return (
+            sin_roll * cos_pitch * cos_yaw - cos_roll * sin_pitch * sin_yaw,
+            cos_roll * sin_pitch * cos_yaw + sin_roll * cos_pitch * sin_yaw,
+            cos_roll * cos_pitch * sin_yaw - sin_roll * sin_pitch * cos_yaw,
+            cos_roll * cos_pitch * cos_yaw + sin_roll * sin_pitch * sin_yaw,
+        )
 
     @staticmethod
     def _normalize_angle(angle: float) -> float:

@@ -73,6 +73,7 @@ add_service_files(
 add_action_files(
   FILES
   MoveToPose.action
+  ProbeSurface.action
 )
 
 ## Generate added messages and services with any dependencies listed here
@@ -178,6 +179,7 @@ catkin_install_python(PROGRAMS
   scripts/move_to_pose_action_server.py
   scripts/photo_pose_workflow_example.py
   scripts/pose_servo_node.py
+  scripts/probe_surface_action_server.py
   scripts/run_vision_service.py
   scripts/twist_controller_node.py
   scripts/vision_pose_publisher.py

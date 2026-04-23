@@ -1,5 +1,5 @@
 motion:
-  probe_speed: 0.005
+  probe_speed: 0.008
   retract_speed: 0.02
   search_speed: 0.003
   search_traverse_speed: 0.012
@@ -29,8 +29,8 @@ probe:
   retract_distance: 0.005
   inter_probe_backoff_distance: 0.01
   second_probe_y_offset: 0.02
-  max_probe_distance: 0.1
-  probe_timeout: 10.0
+  max_probe_distance: 0.2
+  probe_timeout: 20.0
 
 search:
   step_y: 0.001

@@ -14,7 +14,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
-from usb_c_insertion.msg import MoveToPoseAction, MoveToPoseGoal
+from usb_c_insertion.msg import MoveToPoseAction, MoveToPoseGoal, ProbeSurfaceAction, ProbeSurfaceGoal
 from usb_c_insertion.srv import ComputePrePose, ComputePrePoseRequest, RunVision, RunVisionRequest
 
 
@@ -31,6 +31,7 @@ class PhotoPoseWorkflowExample:
         self._action_name = str(rospy.get_param("~move_action_name", "move_to_pose")).strip()
         self._vision_service_name = str(rospy.get_param("~vision_service_name", "run_vision")).strip()
         self._prepose_service_name = str(rospy.get_param("~prepose_service_name", "compute_prepose")).strip()
+        self._probe_action_name = str(rospy.get_param("~probe_action_name", "probe_surface")).strip()
         self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link"))
 
         self._position_tolerance = float(rospy.get_param("~photo_pose/position_tolerance", 0.002))
@@ -41,6 +42,7 @@ class PhotoPoseWorkflowExample:
 
         self._goal = self._load_goal_pose()
         self._client = actionlib.SimpleActionClient(self._action_name, MoveToPoseAction)
+        self._probe_client = actionlib.SimpleActionClient(self._probe_action_name, ProbeSurfaceAction)
 
     def run(self) -> bool:
         rospy.loginfo(
@@ -64,7 +66,10 @@ class PhotoPoseWorkflowExample:
         if pre_pose is None:
             return False
 
-        return self._move_to_named_pose(pre_pose, "prepose")
+        if not self._move_to_named_pose(pre_pose, "prepose"):
+            return False
+
+        return self._probe_surface(port_pose)
 
     def _move_to_photo_pose(self) -> bool:
         return self._move_to_named_pose(self._goal, "photo_pose")
@@ -165,6 +170,37 @@ class PhotoPoseWorkflowExample:
             str(bool(feedback.reached_position)).lower(),
             str(bool(feedback.reached_orientation)).lower(),
         )
+
+    def _probe_surface(self, port_pose: PoseStamped) -> bool:
+        if not self._probe_client.wait_for_server(rospy.Duration.from_sec(5.0)):
+            rospy.logerr("[usb_c_insertion] event=photo_pose_workflow_failed reason=probe_action_unavailable")
+            return False
+
+        goal = ProbeSurfaceGoal(port_pose=port_pose)
+        rospy.loginfo("[usb_c_insertion] event=probe_surface_goal_sent")
+        self._probe_client.send_goal(goal)
+        finished = self._probe_client.wait_for_result(rospy.Duration.from_sec(45.0))
+        if not finished:
+            self._probe_client.cancel_goal()
+            rospy.logerr("[usb_c_insertion] event=photo_pose_workflow_failed reason=probe_action_timeout")
+            return False
+
+        result = self._probe_client.get_result()
+        if result is None or not result.success:
+            message = result.message if result is not None else "no_result"
+            rospy.logerr(
+                "[usb_c_insertion] event=photo_pose_workflow_failed reason=probe_action_failed message=%s",
+                message,
+            )
+            return False
+
+        rospy.loginfo(
+            "[usb_c_insertion] event=probe_surface_complete surface_found=%s yaw_correction_rad=%.4f yaw_correction_deg=%.2f",
+            str(bool(result.surface_found)).lower(),
+            float(result.yaw_correction_rad),
+            math.degrees(float(result.yaw_correction_rad)),
+        )
+        return True
 
     def _load_goal_pose(self) -> PoseStamped:
         pose = PoseStamped()

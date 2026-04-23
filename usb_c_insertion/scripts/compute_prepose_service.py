@@ -13,6 +13,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from prepose_planner import compute_port_frame_target, compute_tcp_target_orientation
+from tf_interface import TFInterface
 from usb_c_insertion.srv import ComputePrePose, ComputePrePoseResponse
 
 
@@ -23,6 +24,7 @@ class ComputePrePoseServiceNode:
         self._offset_x = float(rospy.get_param("~state_machine/prepose_offset_port_x", -0.03))
         self._offset_y = float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0))
         self._offset_z = float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0))
+        self._tf = TFInterface()
         self._service = rospy.Service(self._service_name, ComputePrePose, self._handle_request)
         rospy.loginfo("[usb_c_insertion] event=compute_prepose_service_ready service=%s", self._service_name)
 
@@ -36,6 +38,12 @@ class ComputePrePoseServiceNode:
             return response
 
         try:
+            current_tool_pose = self._tf.get_tool_pose_in_base()
+            if current_tool_pose is None:
+                response.success = False
+                response.message = "current_tool_pose_unavailable"
+                return response
+
             target_xyz = compute_port_frame_target(
                 (
                     port_pose.pose.position.x,
@@ -49,6 +57,12 @@ class ComputePrePoseServiceNode:
                 (self._offset_x, self._offset_y, self._offset_z),
             )
             target_quaternion = compute_tcp_target_orientation(
+                (
+                    current_tool_pose.pose.orientation.x,
+                    current_tool_pose.pose.orientation.y,
+                    current_tool_pose.pose.orientation.z,
+                    current_tool_pose.pose.orientation.w,
+                ),
                 (
                     port_pose.pose.orientation.x,
                     port_pose.pose.orientation.y,

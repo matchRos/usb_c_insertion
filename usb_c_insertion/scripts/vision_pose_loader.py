@@ -36,7 +36,7 @@ def load_vision_pose_from_json(json_path: str) -> VisionPose:
     # The vision pipeline reports the case yaw with the opposite sign relative
     # to the robot-side convention used by the insertion stack, so invert it
     # before applying the fixed frame offset.
-    yaw_rad = _normalize_angle((-_extract_yaw_rad(data)) + YAW_OFFSET_RAD)
+    yaw_rad = _normalize_angle((_extract_yaw_rad(data)) + YAW_OFFSET_RAD)
     qx, qy, qz, qw = _quaternion_from_yaw(yaw_rad)
     transformed_x, transformed_y, transformed_z = _transform_position_axes(
         float(position["x"]),
@@ -56,6 +56,14 @@ def load_vision_pose_from_json(json_path: str) -> VisionPose:
 
 
 def _extract_yaw_rad(data: Dict[str, Any]) -> float:
+    plane = data.get("plane")
+    if isinstance(plane, dict):
+        normal = plane.get("normal")
+        if isinstance(normal, dict):
+            yaw_from_plane = _yaw_from_plane_normal(normal)
+            if yaw_from_plane is not None:
+                return yaw_from_plane
+
     orientation = _require_mapping(data, "orientation")
 
     euler_xyz_deg = orientation.get("euler_xyz_deg")
@@ -72,6 +80,27 @@ def _extract_yaw_rad(data: Dict[str, Any]) -> float:
         )
 
     raise ValueError("orientation must contain either euler_xyz_deg or quaternion_xyzw")
+
+
+def _yaw_from_plane_normal(normal: Dict[str, Any]) -> float | None:
+    """
+    Estimate the case yaw from the wall normal projected into the base XY plane.
+
+    The sticker center still defines the position. For orientation we prefer the
+    larger fitted wall plane from the JSON because it is more stable than the
+    small local sticker geometry.
+    """
+    try:
+        normal_x = float(normal["x"])
+        normal_y = float(normal["y"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    xy_norm = math.hypot(normal_x, normal_y)
+    if xy_norm < 1e-6:
+        return None
+
+    return math.atan2(normal_y, normal_x)
 
 
 def _require_mapping(data: Dict[str, Any], key: str) -> Dict[str, Any]:

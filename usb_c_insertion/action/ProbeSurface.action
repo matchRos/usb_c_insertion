@@ -1,0 +1,10 @@
+geometry_msgs/PoseStamped port_pose
+---
+bool success
+bool surface_found
+string message
+float32 yaw_correction_rad
+geometry_msgs/PointStamped contact_point_1
+geometry_msgs/PointStamped contact_point_2
+---
+string stage
