@@ -46,6 +46,37 @@ def generate_raster_pattern(step_x: float, step_y: float, width: float, height: 
     return _to_incremental_offsets(absolute_points)
 
 
+def generate_centered_raster_pattern(step_x: float, step_y: float, width: float, height: float) -> List[PlanarOffset]:
+    """
+    Generate a raster that starts at the estimated center and expands by rows.
+
+    This keeps the first motions close to the estimated port position while
+    still covering the configured rectangular search window deterministically.
+    """
+    _validate_inputs(step_x, step_y, width, height)
+
+    x_positions = _symmetric_positions(width * 0.5, step_x)
+    y_positions = _center_out_positions(height * 0.5, step_y)
+
+    absolute_points = [(0.0, 0.0)]
+    current_x = 0.0
+    for row_index, y_value in enumerate(y_positions):
+        if row_index == 0:
+            row_x_positions = _center_row_positions(width * 0.5, step_x)
+        else:
+            ascending = list(x_positions)
+            descending = list(reversed(x_positions))
+            row_x_positions = ascending if abs(ascending[0] - current_x) <= abs(descending[0] - current_x) else descending
+
+        for x_value in row_x_positions:
+            if absolute_points[-1] == (x_value, y_value):
+                continue
+            absolute_points.append((x_value, y_value))
+            current_x = x_value
+
+    return _to_incremental_offsets(absolute_points)
+
+
 def generate_expanding_square_pattern(step: float, max_radius: float) -> List[PlanarOffset]:
     """
     Generate an expanding square spiral as incremental offsets.
@@ -142,6 +173,30 @@ def _forward_positions(max_extent: float, step: float) -> List[float]:
     while current <= max_extent + 1e-9:
         positions.append(round(current, 10))
         current += step
+    return positions
+
+
+def _center_out_positions(half_extent: float, step: float) -> List[float]:
+    positions = [0.0]
+    current = step
+    while current <= half_extent + 1e-9:
+        positions.extend([round(current, 10), round(-current, 10)])
+        current += step
+    return positions
+
+
+def _center_row_positions(half_extent: float, step: float) -> List[float]:
+    positive_positions = []
+    current = step
+    while current <= half_extent + 1e-9:
+        positive_positions.append(round(current, 10))
+        current += step
+
+    positions = list(positive_positions)
+    positions.extend(reversed(positive_positions[:-1]))
+    positions.append(0.0)
+    positions.extend(-value for value in positive_positions)
+
     return positions
 
 

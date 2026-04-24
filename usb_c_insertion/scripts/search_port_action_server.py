@@ -19,7 +19,7 @@ from contact_detector import ContactDetector
 from ft_interface import FTInterface
 from prepose_planner import rotate_vector_by_quaternion
 from robot_interface import RobotInterface
-from search_pattern import generate_raster_pattern
+from search_pattern import generate_centered_raster_pattern
 from tf_interface import TFInterface
 from usb_c_insertion.msg import (
     MoveToPoseAction,
@@ -53,10 +53,18 @@ class SearchPortActionServer:
         self._search_timeout = float(rospy.get_param("~search/search_timeout", 50.0))
         self._search_traverse_timeout = float(rospy.get_param("~search/traverse_timeout", 4.0))
         self._search_contact_force_target = float(rospy.get_param("~search/contact_force_target", 2.0))
-        self._search_contact_force_tolerance = float(rospy.get_param("~search/contact_force_tolerance", 0.5))
-        self._search_force_control_gain = float(rospy.get_param("~search/force_control_gain", 0.001))
-        self._search_force_control_speed_limit = float(rospy.get_param("~search/force_control_speed_limit", 0.003))
-        self._search_force_control_timeout = float(rospy.get_param("~search/force_control_timeout", 2.0))
+        self._search_probe_speed = float(
+            rospy.get_param(
+                "~search/probe_speed",
+                rospy.get_param("~search/force_control_speed_limit", 0.003),
+            )
+        )
+        self._search_probe_timeout = float(
+            rospy.get_param(
+                "~search/probe_timeout",
+                rospy.get_param("~search/force_control_timeout", 2.0),
+            )
+        )
         self._search_socket_depth_threshold = float(rospy.get_param("~search/socket_depth_threshold", 0.002))
         self._search_zero_ft_before_search = bool(
             rospy.get_param(
@@ -176,8 +184,31 @@ class SearchPortActionServer:
             probe_result.contact_point.point.z,
         )
 
+        self._publish_feedback("search_initial_probe", started_at, 0, 0, reference_point, probe_direction)
+        probe_success, probe_reason, inserted_depth, contact_force = self._probe_search_position(
+            reference_point,
+            probe_direction,
+            "initial",
+            0,
+            0,
+        )
+        if not probe_success:
+            self._abort("search_initial_probe_failed", probe_reason, probe_reason)
+            return
+
+        self._publish_feedback("search_initial_probe_complete", started_at, 0, 0, reference_point, probe_direction)
+        if probe_reason == "socket_depth_reached":
+            result = self._make_result(True, True, "potential_port_found", "", "")
+            result.wall_contact_point = probe_result.contact_point
+            result.found_pose = self._current_pose_or_empty()
+            result.inserted_depth = float(inserted_depth)
+            result.contact_force = float(contact_force)
+            result.completed_steps = 0
+            self._server.set_succeeded(result)
+            return
+
         try:
-            pattern = generate_raster_pattern(
+            pattern = generate_centered_raster_pattern(
                 step_x=self._search_step_y,
                 step_y=self._search_step_z,
                 width=self._search_width,
@@ -236,28 +267,34 @@ class SearchPortActionServer:
                 return
 
             self._publish_feedback(
-                "search_force_control",
+                "search_probe",
                 started_at,
                 step_index,
                 total_steps,
                 reference_point,
                 probe_direction,
             )
-            force_success, force_reason = self._regulate_contact_force(
+            probe_success, probe_reason, inserted_depth, contact_force = self._probe_search_position(
                 reference_point,
                 probe_direction,
-                self._search_contact_force_target,
-                self._search_contact_force_tolerance,
-                self._search_force_control_timeout,
+                "raster",
+                step_index,
+                total_steps,
             )
-            if not force_success:
-                self._abort("search_force_control_failed", force_reason, force_reason)
+            if not probe_success:
+                self._abort("search_probe_failed", probe_reason, probe_reason)
                 return
 
-            inserted_depth = self._compute_inserted_depth(reference_point, probe_direction)
-            contact_force = self._get_search_contact_force()
-            if inserted_depth >= self._search_socket_depth_threshold:
-                result = self._make_result(True, True, "port_found", "", "")
+            self._publish_feedback(
+                "search_probe_complete",
+                started_at,
+                step_index,
+                total_steps,
+                reference_point,
+                probe_direction,
+            )
+            if probe_reason == "socket_depth_reached":
+                result = self._make_result(True, True, "potential_port_found", "", "")
                 result.wall_contact_point = probe_result.contact_point
                 result.found_pose = self._current_pose_or_empty()
                 result.inserted_depth = float(inserted_depth)
@@ -326,48 +363,70 @@ class SearchPortActionServer:
             return False, result.error_code or result.message
         return True, ""
 
-    def _regulate_contact_force(
+    def _probe_search_position(
         self,
         reference_point,
         direction_xyz,
-        target_force: float,
-        tolerance: float,
-        timeout: float,
-    ) -> tuple[bool, str]:
-        deadline = rospy.Time.now() + rospy.Duration.from_sec(max(0.1, timeout))
-        rate = rospy.Rate(max(1.0, float(rospy.get_param("~motion/command_rate", 100.0))))
+        probe_label: str,
+        step_index: int,
+        total_steps: int,
+    ) -> tuple[bool, str, float, float]:
+        deadline = rospy.Time.now() + rospy.Duration.from_sec(max(0.1, self._search_probe_timeout))
+        rate = rospy.Rate(max(1.0, float(rospy.get_param("~motion/command_rate", 500.0))))
         direction = self._normalize_vector(direction_xyz)
+        start_pose = self._tf.get_tool_pose_in_base()
+        if start_pose is None:
+            self._robot.stop_motion()
+            self._log_search_probe_result(
+                probe_label,
+                step_index,
+                total_steps,
+                False,
+                "missing_initial_tf",
+                0.0,
+                0.0,
+                self._get_search_contact_force(),
+                self._get_search_contact_force(),
+                None,
+            )
+            return False, "missing_initial_tf", 0.0, self._get_search_contact_force()
+
+        start_xyz = (
+            start_pose.pose.position.x,
+            start_pose.pose.position.y,
+            start_pose.pose.position.z,
+        )
+        max_contact_force = self._get_search_contact_force()
 
         while not rospy.is_shutdown():
             if self._server.is_preempt_requested():
                 self._robot.stop_motion()
-                return False, "preempted"
+                return self._finish_search_probe(probe_label, step_index, total_steps, False, "preempted", reference_point, direction, start_xyz, max_contact_force)
             if rospy.Time.now() > deadline:
                 self._robot.stop_motion()
-                return False, "force_control_timeout"
+                return self._finish_search_probe(probe_label, step_index, total_steps, False, "search_probe_timeout", reference_point, direction, start_xyz, max_contact_force)
             if self._ft.is_wrench_stale():
                 self._robot.stop_motion()
-                return False, "stale_wrench"
+                return self._finish_search_probe(probe_label, step_index, total_steps, False, "stale_wrench", reference_point, direction, start_xyz, max_contact_force)
             if self._tf.get_tool_pose_in_base() is None:
                 self._robot.stop_motion()
-                return False, "missing_tf"
+                return self._finish_search_probe(probe_label, step_index, total_steps, False, "missing_tf", reference_point, direction, start_xyz, max_contact_force)
 
             contact_force = self._get_search_contact_force()
-            if abs(target_force - contact_force) <= tolerance:
+            max_contact_force = max(max_contact_force, contact_force)
+            inserted_depth = self._compute_inserted_depth(reference_point, direction)
+            if contact_force >= self._search_contact_force_target:
                 self._robot.stop_motion()
-                return True, ""
+                return self._finish_search_probe(probe_label, step_index, total_steps, True, "wall_contact_reached", reference_point, direction, start_xyz, max_contact_force)
 
-            speed = max(
-                -self._search_force_control_speed_limit,
-                min(
-                    self._search_force_control_speed_limit,
-                    self._search_force_control_gain * (target_force - contact_force),
-                ),
-            )
+            if inserted_depth >= self._search_socket_depth_threshold:
+                self._robot.stop_motion()
+                return self._finish_search_probe(probe_label, step_index, total_steps, True, "socket_depth_reached", reference_point, direction, start_xyz, max_contact_force)
+
             self._robot.send_twist(
-                direction[0] * speed,
-                direction[1] * speed,
-                direction[2] * speed,
+                direction[0] * self._search_probe_speed,
+                direction[1] * self._search_probe_speed,
+                direction[2] * self._search_probe_speed,
                 0.0,
                 0.0,
                 0.0,
@@ -375,7 +434,90 @@ class SearchPortActionServer:
             rate.sleep()
 
         self._robot.stop_motion()
-        return False, "shutdown"
+        return self._finish_search_probe(probe_label, step_index, total_steps, False, "shutdown", reference_point, direction, start_xyz, max_contact_force)
+
+    def _finish_search_probe(
+        self,
+        probe_label: str,
+        step_index: int,
+        total_steps: int,
+        success: bool,
+        reason: str,
+        reference_point,
+        direction,
+        start_xyz,
+        max_contact_force: float,
+    ) -> tuple[bool, str, float, float]:
+        final_pose = self._tf.get_tool_pose_in_base()
+        contact_force = self._get_search_contact_force()
+        inserted_depth = self._compute_inserted_depth(reference_point, direction)
+        travel_distance = 0.0
+        final_xyz = None
+        if final_pose is not None:
+            final_xyz = (
+                final_pose.pose.position.x,
+                final_pose.pose.position.y,
+                final_pose.pose.position.z,
+            )
+            travel_distance = self._distance(start_xyz, final_xyz)
+
+        self._log_search_probe_result(
+            probe_label,
+            step_index,
+            total_steps,
+            success,
+            reason,
+            inserted_depth,
+            travel_distance,
+            contact_force,
+            max(max_contact_force, contact_force),
+            final_xyz,
+        )
+        return success, reason, inserted_depth, contact_force
+
+    def _log_search_probe_result(
+        self,
+        probe_label: str,
+        step_index: int,
+        total_steps: int,
+        success: bool,
+        reason: str,
+        inserted_depth: float,
+        travel_distance: float,
+        contact_force: float,
+        max_contact_force: float,
+        final_xyz,
+    ) -> None:
+        if final_xyz is None:
+            rospy.loginfo(
+                "[usb_c_insertion] event=search_probe_result label=%s step=%d total=%d success=%s reason=%s inserted_depth=%.4f travel_distance=%.4f contact_force=%.3f max_contact_force=%.3f final_pose=missing_tf",
+                probe_label,
+                int(step_index),
+                int(total_steps),
+                str(bool(success)).lower(),
+                reason,
+                inserted_depth,
+                travel_distance,
+                contact_force,
+                max_contact_force,
+            )
+            return
+
+        rospy.loginfo(
+            "[usb_c_insertion] event=search_probe_result label=%s step=%d total=%d success=%s reason=%s inserted_depth=%.4f travel_distance=%.4f contact_force=%.3f max_contact_force=%.3f final_x=%.4f final_y=%.4f final_z=%.4f",
+            probe_label,
+            int(step_index),
+            int(total_steps),
+            str(bool(success)).lower(),
+            reason,
+            inserted_depth,
+            travel_distance,
+            contact_force,
+            max_contact_force,
+            final_xyz[0],
+            final_xyz[1],
+            final_xyz[2],
+        )
 
     def _publish_feedback(
         self,
@@ -482,6 +624,14 @@ class SearchPortActionServer:
         if magnitude <= 1e-9:
             raise ValueError("direction_xyz must be non-zero")
         return tuple(component / magnitude for component in direction_xyz)
+
+    @staticmethod
+    def _distance(point_a, point_b) -> float:
+        return math.sqrt(
+            (point_b[0] - point_a[0]) ** 2
+            + (point_b[1] - point_a[1]) ** 2
+            + (point_b[2] - point_a[2]) ** 2
+        )
 
 
 def main() -> None:
