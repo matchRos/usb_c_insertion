@@ -46,7 +46,15 @@ def generate_raster_pattern(step_x: float, step_y: float, width: float, height: 
     return _to_incremental_offsets(absolute_points)
 
 
-def generate_centered_raster_pattern(step_x: float, step_y: float, width: float, height: float) -> List[PlanarOffset]:
+def generate_centered_raster_pattern(
+    step_x: float,
+    step_y: float,
+    width: float,
+    height: float,
+    preferred_x_sign: float = 1.0,
+    preferred_y_sign: float = 1.0,
+    diagonal_first: bool = False,
+) -> List[PlanarOffset]:
     """
     Generate a raster that starts at the estimated center and expands by rows.
 
@@ -55,23 +63,40 @@ def generate_centered_raster_pattern(step_x: float, step_y: float, width: float,
     """
     _validate_inputs(step_x, step_y, width, height)
 
-    x_positions = _symmetric_positions(width * 0.5, step_x)
-    y_positions = _center_out_positions(height * 0.5, step_y)
+    preferred_x_sign = _normalize_sign(preferred_x_sign)
+    preferred_y_sign = _normalize_sign(preferred_y_sign)
+
+    half_width = width * 0.5
+    half_height = height * 0.5
+    x_positions = _symmetric_positions(half_width, step_x)
+    y_positions = _preferred_center_out_positions(
+        half_height,
+        step_y,
+        preferred_y_sign,
+        start_at_preferred=diagonal_first,
+    )
 
     absolute_points = [(0.0, 0.0)]
+    visited_points = {(0.0, 0.0)}
     current_x = 0.0
     for row_index, y_value in enumerate(y_positions):
-        if row_index == 0:
-            row_x_positions = _center_row_positions(width * 0.5, step_x)
+        if row_index == 0 and (not diagonal_first or abs(y_value) <= 1e-9):
+            row_x_positions = _preferred_axis_positions(half_width, step_x, preferred_x_sign, include_zero=False)
+        elif row_index == 0:
+            row_x_positions = _preferred_axis_positions(half_width, step_x, preferred_x_sign, include_zero=False)
+            if not row_x_positions:
+                row_x_positions = [0.0]
         else:
             ascending = list(x_positions)
             descending = list(reversed(x_positions))
             row_x_positions = ascending if abs(ascending[0] - current_x) <= abs(descending[0] - current_x) else descending
 
         for x_value in row_x_positions:
-            if absolute_points[-1] == (x_value, y_value):
+            point = (x_value, y_value)
+            if point in visited_points:
                 continue
-            absolute_points.append((x_value, y_value))
+            absolute_points.append(point)
+            visited_points.add(point)
             current_x = x_value
 
     return _to_incremental_offsets(absolute_points)
@@ -185,19 +210,54 @@ def _center_out_positions(half_extent: float, step: float) -> List[float]:
     return positions
 
 
-def _center_row_positions(half_extent: float, step: float) -> List[float]:
-    positive_positions = []
+def _preferred_center_out_positions(
+    half_extent: float,
+    step: float,
+    preferred_sign: float,
+    start_at_preferred: bool,
+) -> List[float]:
+    signed_positions = []
     current = step
     while current <= half_extent + 1e-9:
-        positive_positions.append(round(current, 10))
+        signed_positions.extend(
+            [
+                round(preferred_sign * current, 10),
+                round(-preferred_sign * current, 10),
+            ]
+        )
         current += step
 
-    positions = list(positive_positions)
-    positions.extend(reversed(positive_positions[:-1]))
-    positions.append(0.0)
-    positions.extend(-value for value in positive_positions)
+    if not signed_positions:
+        return [0.0]
+    if start_at_preferred:
+        return [signed_positions[0], 0.0] + signed_positions[1:]
+    return [0.0] + signed_positions
 
+
+def _preferred_axis_positions(
+    half_extent: float,
+    step: float,
+    preferred_sign: float,
+    include_zero: bool,
+) -> List[float]:
+    preferred_positions = []
+    opposite_positions = []
+    current = step
+    while current <= half_extent + 1e-9:
+        preferred_positions.append(round(preferred_sign * current, 10))
+        opposite_positions.append(round(-preferred_sign * current, 10))
+        current += step
+
+    positions = []
+    if include_zero:
+        positions.append(0.0)
+    positions.extend(preferred_positions)
+    positions.extend(opposite_positions)
     return positions
+
+
+def _normalize_sign(value: float) -> float:
+    return -1.0 if float(value) < 0.0 else 1.0
 
 
 def _validate_inputs(step_x: float, step_y: float, width: float, height: float) -> None:

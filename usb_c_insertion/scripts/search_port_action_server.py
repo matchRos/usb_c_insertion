@@ -52,12 +52,25 @@ class SearchPortActionServer:
         self._search_height = float(rospy.get_param("~search/max_search_height", 0.02))
         self._search_timeout = float(rospy.get_param("~search/search_timeout", 50.0))
         self._search_traverse_timeout = float(rospy.get_param("~search/traverse_timeout", 4.0))
+        self._search_traverse_speed = float(
+            rospy.get_param(
+                "~search/traverse_speed",
+                rospy.get_param("~motion/search_traverse_speed", 0.012),
+            )
+        )
+        self._search_traverse_tolerance = float(rospy.get_param("~search/traverse_tolerance", 0.0003))
         self._search_lift_off_distance = float(rospy.get_param("~search/lift_off_distance", 0.0001))
         self._search_pre_probe_approach_fraction = self._clamp(
             float(rospy.get_param("~search/pre_probe_approach_fraction", 0.9)),
             0.0,
             1.0,
         )
+        self._search_diagonal_pre_probe_approach = bool(
+            rospy.get_param("~search/diagonal_pre_probe_approach", True)
+        )
+        self._search_preferred_tool_x_sign = float(rospy.get_param("~search/preferred_tool_x_sign", -1.0))
+        self._search_preferred_z_sign = float(rospy.get_param("~search/preferred_z_sign", 1.0))
+        self._search_diagonal_first = bool(rospy.get_param("~search/diagonal_first", True))
         self._search_lift_off_speed = float(rospy.get_param("~search/lift_off_speed", 0.001))
         self._search_pre_probe_approach_speed = float(rospy.get_param("~search/pre_probe_approach_speed", 0.001))
         self._search_contact_force_target = float(rospy.get_param("~search/contact_force_target", 2.0))
@@ -221,10 +234,23 @@ class SearchPortActionServer:
                 step_y=self._search_step_z,
                 width=self._search_width,
                 height=self._search_height,
+                preferred_x_sign=self._search_preferred_tool_x_sign,
+                preferred_y_sign=self._search_preferred_z_sign,
+                diagonal_first=self._search_diagonal_first,
             )
         except ValueError as exc:
             self._abort("search_pattern_invalid: %s" % exc, "search_pattern_invalid")
             return
+        if pattern:
+            rospy.loginfo(
+                "[usb_c_insertion] event=search_pattern_ready steps=%d first_dx=%.4f first_dz=%.4f preferred_tool_x_sign=%.1f preferred_z_sign=%.1f diagonal_first=%s",
+                len(pattern),
+                pattern[0].dx,
+                pattern[0].dy,
+                self._search_preferred_tool_x_sign,
+                self._search_preferred_z_sign,
+                str(self._search_diagonal_first).lower(),
+            )
 
         current_pose = self._tf.get_tool_pose_in_base()
         if current_pose is None:
@@ -275,6 +301,10 @@ class SearchPortActionServer:
                 current_xyz[1] + offset.dx * wall_tangent[1],
                 current_xyz[2] + offset.dy,
             )
+            target_lift_distance = self._search_lift_off_distance
+            if self._search_diagonal_pre_probe_approach:
+                target_lift_distance = self._search_lift_off_distance * (1.0 - self._search_pre_probe_approach_fraction)
+
             self._publish_feedback(
                 "search_move",
                 started_at,
@@ -283,32 +313,34 @@ class SearchPortActionServer:
                 reference_point,
                 probe_direction,
             )
-            move_success, move_error_code = self._move_to_pose(
-                self._build_lifted_pose(current_xyz, reference_quaternion, probe_direction),
-                reference_quaternion,
+            move_success, move_error_code = self._move_to_xyz(
+                self._build_offset_from_surface(current_xyz, probe_direction, target_lift_distance),
+                self._search_traverse_speed,
+                self._search_traverse_tolerance,
                 self._search_traverse_timeout,
             )
             if not move_success:
                 self._abort("search_motion_failed", move_error_code)
                 return
 
-            self._publish_feedback(
-                "search_pre_probe_approach",
-                started_at,
-                step_index,
-                total_steps,
-                reference_point,
-                probe_direction,
-            )
-            move_success, move_error_code = self._move_along_direction(
-                probe_direction,
-                self._search_lift_off_distance * self._search_pre_probe_approach_fraction,
-                self._search_pre_probe_approach_speed,
-                self._search_traverse_timeout,
-            )
-            if not move_success:
-                self._abort("search_pre_probe_approach_failed", move_error_code)
-                return
+            if not self._search_diagonal_pre_probe_approach:
+                self._publish_feedback(
+                    "search_pre_probe_approach",
+                    started_at,
+                    step_index,
+                    total_steps,
+                    reference_point,
+                    probe_direction,
+                )
+                move_success, move_error_code = self._move_along_direction(
+                    probe_direction,
+                    self._search_lift_off_distance * self._search_pre_probe_approach_fraction,
+                    self._search_pre_probe_approach_speed,
+                    self._search_traverse_timeout,
+                )
+                if not move_success:
+                    self._abort("search_pre_probe_approach_failed", move_error_code)
+                    return
 
             self._publish_feedback(
                 "search_probe",
@@ -379,14 +411,14 @@ class SearchPortActionServer:
             port_pose.pose.position.z + offset[2],
         )
 
-    def _build_lifted_pose(self, surface_xyz, tool_quaternion, probe_direction) -> Tuple[float, float, float]:
-        if self._search_lift_off_distance <= 0.0:
+    def _build_offset_from_surface(self, surface_xyz, probe_direction, lift_distance: float) -> Tuple[float, float, float]:
+        if lift_distance <= 0.0:
             return surface_xyz
         direction = self._normalize_vector(probe_direction)
         return (
-            surface_xyz[0] - direction[0] * self._search_lift_off_distance,
-            surface_xyz[1] - direction[1] * self._search_lift_off_distance,
-            surface_xyz[2] - direction[2] * self._search_lift_off_distance,
+            surface_xyz[0] - direction[0] * lift_distance,
+            surface_xyz[1] - direction[1] * lift_distance,
+            surface_xyz[2] - direction[2] * lift_distance,
         )
 
     def _move_to_pose(self, target_xyz, target_quaternion, timeout: float) -> tuple[bool, str]:
@@ -416,6 +448,64 @@ class SearchPortActionServer:
         if not result.success:
             return False, result.error_code or result.message
         return True, ""
+
+    def _move_to_xyz(
+        self,
+        target_xyz,
+        speed: float,
+        tolerance: float,
+        timeout: float,
+    ) -> tuple[bool, str]:
+        commanded_speed = max(0.0, float(speed))
+        if commanded_speed <= 0.0:
+            self._robot.stop_motion()
+            return False, "invalid_speed"
+
+        deadline = rospy.Time.now() + rospy.Duration.from_sec(max(0.1, timeout))
+        allowed_error = max(0.00005, float(tolerance))
+        rate = rospy.Rate(max(1.0, float(rospy.get_param("~motion/command_rate", 500.0))))
+
+        while not rospy.is_shutdown():
+            if self._server.is_preempt_requested():
+                self._robot.stop_motion()
+                return False, "preempted"
+            if rospy.Time.now() > deadline:
+                self._robot.stop_motion()
+                return False, "move_to_xyz_timeout"
+
+            pose = self._tf.get_tool_pose_in_base()
+            if pose is None:
+                self._robot.stop_motion()
+                return False, "missing_tf"
+
+            current_xyz = (
+                pose.pose.position.x,
+                pose.pose.position.y,
+                pose.pose.position.z,
+            )
+            delta = (
+                target_xyz[0] - current_xyz[0],
+                target_xyz[1] - current_xyz[1],
+                target_xyz[2] - current_xyz[2],
+            )
+            distance = self._distance(current_xyz, target_xyz)
+            if distance <= allowed_error:
+                self._robot.stop_motion()
+                return True, ""
+
+            direction = tuple(component / distance for component in delta)
+            self._robot.send_twist(
+                direction[0] * commanded_speed,
+                direction[1] * commanded_speed,
+                direction[2] * commanded_speed,
+                0.0,
+                0.0,
+                0.0,
+            )
+            rate.sleep()
+
+        self._robot.stop_motion()
+        return False, "shutdown"
 
     def _move_along_direction(
         self,

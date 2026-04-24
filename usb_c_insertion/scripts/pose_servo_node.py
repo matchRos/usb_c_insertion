@@ -34,7 +34,15 @@ class PoseServoNode:
         self._status_topic = rospy.get_param("~topics/pose_servo_status", "/usb_c_insertion/pose_servo_status")
 
         self._command_rate = float(rospy.get_param("~motion/command_rate", 500.0))
-        self._position_gain = float(rospy.get_param("~motion/pose_servo_position_gain", 1.5))
+        self._position_kp = float(
+            rospy.get_param(
+                "~motion/pose_servo_position_kp",
+                rospy.get_param("~motion/pose_servo_position_gain", 1.5),
+            )
+        )
+        self._position_ki = float(rospy.get_param("~motion/pose_servo_position_ki", 0.0))
+        self._position_kd = float(rospy.get_param("~motion/pose_servo_position_kd", 0.0))
+        self._position_integral_limit = float(rospy.get_param("~motion/pose_servo_position_integral_limit", 0.02))
         self._orientation_gain = float(rospy.get_param("~motion/pose_servo_orientation_gain", 1.0))
         self._position_tolerance = float(rospy.get_param("~motion/pose_servo_position_tolerance", 0.0005))
         self._orientation_tolerance = float(rospy.get_param("~motion/pose_servo_orientation_tolerance", 0.03))
@@ -51,6 +59,9 @@ class PoseServoNode:
         self._last_current_pose: Optional[PoseStamped] = None
         self._last_position_error = 0.0
         self._last_orientation_error = 0.0
+        self._position_integral = (0.0, 0.0, 0.0)
+        self._previous_position_error = (0.0, 0.0, 0.0)
+        self._last_control_time: Optional[rospy.Time] = None
         self._status_publisher = rospy.Publisher(self._status_topic, PoseServoStatus, queue_size=10)
 
         self._target_subscriber = rospy.Subscriber(self._target_topic, PoseStamped, self._target_callback, queue_size=1)
@@ -85,6 +96,7 @@ class PoseServoNode:
             error_x = target.position.x - current_pose.pose.position.x
             error_y = target.position.y - current_pose.pose.position.y
             error_z = target.position.z - current_pose.pose.position.z
+            position_error = (error_x, error_y, error_z)
             distance = math.sqrt(error_x * error_x + error_y * error_y + error_z * error_z)
 
             orientation_error = self._quaternion_error_vector(
@@ -102,6 +114,7 @@ class PoseServoNode:
                 self._remember_status(current_pose, distance, orientation_error_norm)
                 self._publish_status(current_pose, distance, orientation_error_norm, True)
                 self._enabled = False
+                self._reset_position_pid()
                 self._send_zero_twist_once()
                 rate.sleep()
                 continue
@@ -109,16 +122,8 @@ class PoseServoNode:
             self._remember_status(current_pose, distance, orientation_error_norm)
             self._publish_status(current_pose, distance, orientation_error_norm, False)
 
-            linear_speed = min(self._max_linear_speed, self._position_gain * distance)
-            if distance <= 1e-9:
-                vx = 0.0
-                vy = 0.0
-                vz = 0.0
-            else:
-                scale = linear_speed / distance
-                vx = error_x * scale
-                vy = error_y * scale
-                vz = error_z * scale
+            linear_velocity = self._compute_position_pid(position_error)
+            vx, vy, vz = self._limit_linear_vector(linear_velocity)
 
             angular_velocity = self._limit_angular_vector(
                 (
@@ -136,12 +141,16 @@ class PoseServoNode:
         self._target_stamp = rospy.Time.now()
         self._zero_twist_sent = False
         self._goal_reached_latched = False
+        self._reset_position_pid()
 
     def _enable_callback(self, msg: Bool) -> None:
         self._enabled = bool(msg.data)
         if self._enabled:
             self._zero_twist_sent = False
             self._goal_reached_latched = False
+            self._reset_position_pid()
+        else:
+            self._reset_position_pid()
 
     def _publish_status(
         self,
@@ -183,12 +192,53 @@ class PoseServoNode:
         self._robot.send_zero_twist()
         self._zero_twist_sent = True
 
+    def _compute_position_pid(self, position_error):
+        now = rospy.Time.now()
+        if self._last_control_time is None:
+            self._last_control_time = now
+            self._previous_position_error = position_error
+            return tuple(self._position_kp * component for component in position_error)
+
+        dt = max(1e-4, (now - self._last_control_time).to_sec())
+        self._last_control_time = now
+
+        integral = tuple(
+            self._position_integral[index] + position_error[index] * dt
+            for index in range(3)
+        )
+        self._position_integral = self._limit_vector_norm(integral, self._position_integral_limit)
+
+        derivative = tuple(
+            (position_error[index] - self._previous_position_error[index]) / dt
+            for index in range(3)
+        )
+        self._previous_position_error = position_error
+
+        return tuple(
+            self._position_kp * position_error[index]
+            + self._position_ki * self._position_integral[index]
+            + self._position_kd * derivative[index]
+            for index in range(3)
+        )
+
+    def _reset_position_pid(self) -> None:
+        self._position_integral = (0.0, 0.0, 0.0)
+        self._previous_position_error = (0.0, 0.0, 0.0)
+        self._last_control_time = None
+
+    def _limit_linear_vector(self, linear_xyz):
+        return self._limit_vector_norm(linear_xyz, self._max_linear_speed)
+
     def _limit_angular_vector(self, angular_xyz):
-        norm = math.sqrt(sum(component * component for component in angular_xyz))
+        return self._limit_vector_norm(angular_xyz, self._max_angular_speed)
+
+    @staticmethod
+    def _limit_vector_norm(vector_xyz, max_norm: float):
+        norm = math.sqrt(sum(component * component for component in vector_xyz))
         if norm <= 1e-9:
             return (0.0, 0.0, 0.0)
-        scale = min(1.0, self._max_angular_speed / norm)
-        return tuple(component * scale for component in angular_xyz)
+        scale = min(1.0, max(0.0, float(max_norm)) / norm)
+        return tuple(component * scale for component in vector_xyz)
 
     @staticmethod
     def _quaternion_error_vector(current_orientation, target_orientation):
