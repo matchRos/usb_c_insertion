@@ -57,6 +57,12 @@ class TwistControllerNode:
             return Twist()
         age = (rospy.Time.now() - self._last_command_time).to_sec()
         if age > self._watchdog_timeout:
+            rospy.logwarn_throttle(
+                1.0,
+                "[usb_c_insertion] event=twist_watchdog_zero age=%.4f timeout=%.4f",
+                age,
+                self._watchdog_timeout,
+            )
             return Twist()
         return self._target_twist
 

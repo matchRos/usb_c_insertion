@@ -12,8 +12,8 @@ motion:
   watchdog_timeout: 0.1
   pose_servo_position_gain: 0.8
   pose_servo_orientation_gain: 1.0
-  pose_servo_position_tolerance: 0.0015
-  pose_servo_orientation_tolerance: 0.03
+  pose_servo_position_tolerance: 0.0005
+  pose_servo_orientation_tolerance: 0.01
   pose_servo_target_timeout: 15.0
   command_rate: 500.0
 

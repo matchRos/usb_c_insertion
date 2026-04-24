@@ -17,6 +17,7 @@ if SCRIPT_DIR not in sys.path:
 
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
+from usb_c_insertion.msg import PoseServoStatus
 
 
 class PoseServoNode:
@@ -30,13 +31,14 @@ class PoseServoNode:
     def __init__(self):
         self._target_topic = rospy.get_param("~topics/pose_target", "/usb_c_insertion/pose_target")
         self._enable_topic = rospy.get_param("~topics/pose_servo_enable", "/usb_c_insertion/pose_servo_enable")
+        self._status_topic = rospy.get_param("~topics/pose_servo_status", "/usb_c_insertion/pose_servo_status")
 
         self._command_rate = float(rospy.get_param("~motion/command_rate", 500.0))
         self._position_gain = float(rospy.get_param("~motion/pose_servo_position_gain", 1.5))
         self._orientation_gain = float(rospy.get_param("~motion/pose_servo_orientation_gain", 1.0))
-        self._position_tolerance = float(rospy.get_param("~motion/pose_servo_position_tolerance", 0.0015))
+        self._position_tolerance = float(rospy.get_param("~motion/pose_servo_position_tolerance", 0.0005))
         self._orientation_tolerance = float(rospy.get_param("~motion/pose_servo_orientation_tolerance", 0.03))
-        self._max_linear_speed = float(rospy.get_param("~motion/max_linear_speed", 0.1))
+        self._max_linear_speed = float(rospy.get_param("~motion/max_linear_speed", 0.05))
         self._max_angular_speed = float(rospy.get_param("~motion/max_angular_speed", 0.25))
 
         self._tf = TFInterface()
@@ -45,6 +47,8 @@ class PoseServoNode:
         self._target_pose: Optional[PoseStamped] = None
         self._target_stamp = rospy.Time(0)
         self._zero_twist_sent = False
+        self._goal_reached_latched = False
+        self._status_publisher = rospy.Publisher(self._status_topic, PoseServoStatus, queue_size=10)
 
         self._target_subscriber = rospy.Subscriber(self._target_topic, PoseStamped, self._target_callback, queue_size=1)
         self._enable_subscriber = rospy.Subscriber(self._enable_topic, Bool, self._enable_callback, queue_size=1)
@@ -53,16 +57,23 @@ class PoseServoNode:
         rate = rospy.Rate(max(1.0, self._command_rate))
         while not rospy.is_shutdown():
             if not self._enabled:
+                self._publish_status(None, 0.0, 0.0, self._goal_reached_latched)
                 self._send_zero_twist_once()
                 rate.sleep()
                 continue
 
             if self._target_pose is None:
+                self._publish_status(None, 0.0, 0.0, False)
                 rate.sleep()
                 continue
 
             current_pose = self._tf.get_tool_pose_in_base()
             if current_pose is None:
+                rospy.logwarn_throttle(
+                    1.0,
+                    "[usb_c_insertion] event=pose_servo_missing_tf",
+                )
+                self._publish_status(None, 0.0, 0.0, False)
                 rate.sleep()
                 continue
 
@@ -83,10 +94,19 @@ class PoseServoNode:
             )
 
             if distance <= self._position_tolerance and orientation_error_norm <= self._orientation_tolerance:
+                self._goal_reached_latched = True
+                self._publish_status(current_pose, distance, orientation_error_norm, True)
+                rospy.loginfo(
+                    "[usb_c_insertion] event=pose_servo_disabled_internal reason=tolerance_reached pos_err=%.4f ori_err=%.4f",
+                    distance,
+                    orientation_error_norm,
+                )
                 self._enabled = False
                 self._send_zero_twist_once()
                 rate.sleep()
                 continue
+
+            self._publish_status(current_pose, distance, orientation_error_norm, False)
 
             linear_speed = min(self._max_linear_speed, self._position_gain * distance)
             if distance <= 1e-9:
@@ -106,6 +126,18 @@ class PoseServoNode:
                     self._orientation_gain * orientation_error[2],
                 )
             )
+            rospy.loginfo_throttle(
+                1.0,
+                "[usb_c_insertion] event=pose_servo_cmd vx=%.4f vy=%.4f vz=%.4f wx=%.4f wy=%.4f wz=%.4f pos_err=%.4f ori_err=%.4f",
+                vx,
+                vy,
+                vz,
+                angular_velocity[0],
+                angular_velocity[1],
+                angular_velocity[2],
+                distance,
+                orientation_error_norm,
+            )
             self._robot.send_twist(vx, vy, vz, angular_velocity[0], angular_velocity[1], angular_velocity[2])
             self._zero_twist_sent = False
             rate.sleep()
@@ -114,11 +146,35 @@ class PoseServoNode:
         self._target_pose = msg
         self._target_stamp = rospy.Time.now()
         self._zero_twist_sent = False
+        self._goal_reached_latched = False
 
     def _enable_callback(self, msg: Bool) -> None:
+        if self._enabled and not bool(msg.data):
+            rospy.logwarn(
+                "[usb_c_insertion] event=pose_servo_disabled_external"
+            )
         self._enabled = bool(msg.data)
         if self._enabled:
             self._zero_twist_sent = False
+            self._goal_reached_latched = False
+
+    def _publish_status(
+        self,
+        current_pose: Optional[PoseStamped],
+        position_error: float,
+        orientation_error: float,
+        goal_reached: bool,
+    ) -> None:
+        status = PoseServoStatus()
+        status.header.stamp = rospy.Time.now()
+        status.enabled = bool(self._enabled)
+        status.has_target = self._target_pose is not None
+        status.goal_reached = bool(goal_reached)
+        status.position_error = float(position_error)
+        status.orientation_error = float(orientation_error)
+        if current_pose is not None:
+            status.current_pose = current_pose
+        self._status_publisher.publish(status)
 
     def _send_zero_twist_once(self) -> None:
         """
