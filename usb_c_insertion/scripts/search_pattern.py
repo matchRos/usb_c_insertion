@@ -68,7 +68,6 @@ def generate_centered_raster_pattern(
 
     half_width = width * 0.5
     half_height = height * 0.5
-    x_positions = _symmetric_positions(half_width, step_x)
     y_positions = _preferred_center_out_positions(
         half_height,
         step_y,
@@ -77,26 +76,20 @@ def generate_centered_raster_pattern(
     )
 
     absolute_points = [(0.0, 0.0)]
-    visited_points = {(0.0, 0.0)}
     current_x = 0.0
     for row_index, y_value in enumerate(y_positions):
-        if row_index == 0 and (not diagonal_first or abs(y_value) <= 1e-9):
-            row_x_positions = _preferred_axis_positions(half_width, step_x, preferred_x_sign, include_zero=False)
-        elif row_index == 0:
-            row_x_positions = _preferred_axis_positions(half_width, step_x, preferred_x_sign, include_zero=False)
+        if row_index == 0:
+            row_x_positions = _axis_side_positions(half_width, step_x, preferred_x_sign)
             if not row_x_positions:
                 row_x_positions = [0.0]
         else:
-            ascending = list(x_positions)
-            descending = list(reversed(x_positions))
-            row_x_positions = ascending if abs(ascending[0] - current_x) <= abs(descending[0] - current_x) else descending
+            row_x_positions = _continuous_row_positions(half_width, step_x, current_x)
 
         for x_value in row_x_positions:
             point = (x_value, y_value)
-            if point in visited_points:
+            if absolute_points[-1] == point:
                 continue
             absolute_points.append(point)
-            visited_points.add(point)
             current_x = x_value
 
     return _to_incremental_offsets(absolute_points)
@@ -216,22 +209,23 @@ def _preferred_center_out_positions(
     preferred_sign: float,
     start_at_preferred: bool,
 ) -> List[float]:
-    signed_positions = []
+    preferred_positions = []
+    opposite_positions = []
     current = step
     while current <= half_extent + 1e-9:
-        signed_positions.extend(
-            [
-                round(preferred_sign * current, 10),
-                round(-preferred_sign * current, 10),
-            ]
-        )
+        preferred_positions.append(round(preferred_sign * current, 10))
+        opposite_positions.append(round(-preferred_sign * current, 10))
         current += step
 
-    if not signed_positions:
+    if not preferred_positions:
         return [0.0]
     if start_at_preferred:
-        return [signed_positions[0], 0.0] + signed_positions[1:]
-    return [0.0] + signed_positions
+        return preferred_positions + [0.0] + opposite_positions
+
+    positions = [0.0]
+    for preferred_value, opposite_value in zip(preferred_positions, opposite_positions):
+        positions.extend([preferred_value, opposite_value])
+    return positions
 
 
 def _preferred_axis_positions(
@@ -254,6 +248,26 @@ def _preferred_axis_positions(
     positions.extend(preferred_positions)
     positions.extend(opposite_positions)
     return positions
+
+
+def _axis_side_positions(half_extent: float, step: float, direction_sign: float) -> List[float]:
+    positions = []
+    current = step
+    while current <= half_extent + 1e-9:
+        positions.append(round(direction_sign * current, 10))
+        current += step
+    return positions
+
+
+def _continuous_row_positions(half_extent: float, step: float, current_x: float) -> List[float]:
+    x_positions = _symmetric_positions(half_extent, step)
+    if not x_positions:
+        return [0.0]
+    ascending = list(x_positions)
+    descending = list(reversed(x_positions))
+    if abs(ascending[0] - current_x) <= abs(descending[0] - current_x):
+        return ascending
+    return descending
 
 
 def _normalize_sign(value: float) -> float:

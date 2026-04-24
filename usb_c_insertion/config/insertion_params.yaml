@@ -43,14 +43,16 @@ probe:
   probe_timeout: 20.0
 
 search:
-  step_y: 0.0025
-  step_z: 0.002
+  step_y: 0.002
+  step_z: 0.0015
   max_search_width: 0.015
   max_search_height: 0.015
   search_timeout: 35.0
   traverse_timeout: 1.2
-  traverse_speed: 0.018
-  traverse_tolerance: 0.0003
+  traverse_speed: 0.014
+  traverse_tolerance: 0.0005
+  traverse_slowdown_distance: 0.003
+  traverse_min_speed: 0.001
   lift_off_distance: 0.0002
   diagonal_pre_probe_approach: true
   preferred_tool_x_sign: -1.0

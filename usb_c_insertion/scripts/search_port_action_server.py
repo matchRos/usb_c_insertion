@@ -59,6 +59,10 @@ class SearchPortActionServer:
             )
         )
         self._search_traverse_tolerance = float(rospy.get_param("~search/traverse_tolerance", 0.0003))
+        self._search_traverse_slowdown_distance = float(
+            rospy.get_param("~search/traverse_slowdown_distance", 0.003)
+        )
+        self._search_traverse_min_speed = float(rospy.get_param("~search/traverse_min_speed", 0.001))
         self._search_lift_off_distance = float(rospy.get_param("~search/lift_off_distance", 0.0001))
         self._search_pre_probe_approach_fraction = self._clamp(
             float(rospy.get_param("~search/pre_probe_approach_fraction", 0.9)),
@@ -494,10 +498,22 @@ class SearchPortActionServer:
                 return True, ""
 
             direction = tuple(component / distance for component in delta)
+            linear_speed = commanded_speed
+            if self._search_traverse_slowdown_distance > allowed_error:
+                speed_scale = self._clamp(
+                    (distance - allowed_error)
+                    / (self._search_traverse_slowdown_distance - allowed_error),
+                    0.0,
+                    1.0,
+                )
+                linear_speed = commanded_speed * speed_scale
+                linear_speed = max(self._search_traverse_min_speed, linear_speed)
+                linear_speed = min(commanded_speed, linear_speed)
+
             self._robot.send_twist(
-                direction[0] * commanded_speed,
-                direction[1] * commanded_speed,
-                direction[2] * commanded_speed,
+                direction[0] * linear_speed,
+                direction[1] * linear_speed,
+                direction[2] * linear_speed,
                 0.0,
                 0.0,
                 0.0,
