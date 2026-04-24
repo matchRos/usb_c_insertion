@@ -44,8 +44,6 @@ class PhotoPoseWorkflowExample:
         ).strip()
         self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link"))
 
-        self._position_tolerance = float(rospy.get_param("~photo_pose/position_tolerance", 0.002))
-        self._orientation_tolerance = float(rospy.get_param("~photo_pose/orientation_tolerance", 0.05))
         self._settle_time = float(rospy.get_param("~photo_pose/settle_time", 0.4))
         self._timeout = float(rospy.get_param("~photo_pose/timeout", 20.0))
         self._require_fresh_vision = bool(rospy.get_param("~photo_pose/require_fresh_vision_result", True))
@@ -95,8 +93,6 @@ class PhotoPoseWorkflowExample:
     def _move_to_named_pose(self, pose: PoseStamped, pose_name: str) -> bool:
         goal = MoveToPoseGoal()
         goal.target_pose = pose
-        goal.position_tolerance = self._position_tolerance
-        goal.orientation_tolerance = self._orientation_tolerance
         goal.settle_time = self._settle_time
         goal.timeout = self._timeout
 
@@ -119,10 +115,12 @@ class PhotoPoseWorkflowExample:
         state = self._client.get_state()
         if result is None or not bool(result.success):
             message = result.message if result is not None else "no_result"
+            error_code = result.error_code if result is not None else "move_goal_no_result"
             rospy.logerr(
-                "[usb_c_insertion] event=photo_pose_workflow_failed reason=move_goal_failed name=%s state=%d message=%s",
+                "[usb_c_insertion] event=photo_pose_workflow_failed reason=move_goal_failed name=%s state=%d error_code=%s message=%s",
                 pose_name,
                 int(state),
+                error_code,
                 message,
             )
             return False
@@ -206,8 +204,12 @@ class PhotoPoseWorkflowExample:
         result = self._probe_client.get_result()
         if result is None or not result.success:
             message = result.message if result is not None else "no_result"
+            error_code = result.error_code if result is not None else "probe_action_no_result"
+            failure_reason = result.failure_reason if result is not None else ""
             rospy.logerr(
-                "[usb_c_insertion] event=photo_pose_workflow_failed reason=probe_action_failed message=%s",
+                "[usb_c_insertion] event=photo_pose_workflow_failed reason=probe_action_failed error_code=%s failure_reason=%s message=%s",
+                error_code,
+                failure_reason,
                 message,
             )
             return None
@@ -228,8 +230,6 @@ class PhotoPoseWorkflowExample:
         goal = ApplyYawCorrectionGoal()
         goal.reference_pose = reference_pose
         goal.yaw_correction_rad = float(yaw_correction_rad)
-        goal.position_tolerance = self._position_tolerance
-        goal.orientation_tolerance = self._orientation_tolerance
         goal.settle_time = self._settle_time
         goal.timeout = self._timeout
 
@@ -250,8 +250,10 @@ class PhotoPoseWorkflowExample:
         result = self._apply_yaw_client.get_result()
         if result is None or not bool(result.success):
             message = result.message if result is not None else "no_result"
+            error_code = result.error_code if result is not None else "apply_yaw_action_no_result"
             rospy.logerr(
-                "[usb_c_insertion] event=photo_pose_workflow_failed reason=apply_yaw_action_failed message=%s",
+                "[usb_c_insertion] event=photo_pose_workflow_failed reason=apply_yaw_action_failed error_code=%s message=%s",
+                error_code,
                 message,
             )
             return False

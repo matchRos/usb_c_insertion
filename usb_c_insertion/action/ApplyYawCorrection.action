@@ -1,12 +1,11 @@
 geometry_msgs/PoseStamped reference_pose
 float32 yaw_correction_rad
-float32 position_tolerance
-float32 orientation_tolerance
 float32 settle_time
 float32 timeout
 ---
 bool success
 string message
+string error_code
 geometry_msgs/PoseStamped corrected_pose
 ---
 string stage

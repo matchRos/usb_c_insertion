@@ -48,6 +48,9 @@ class PoseServoNode:
         self._target_stamp = rospy.Time(0)
         self._zero_twist_sent = False
         self._goal_reached_latched = False
+        self._last_current_pose: Optional[PoseStamped] = None
+        self._last_position_error = 0.0
+        self._last_orientation_error = 0.0
         self._status_publisher = rospy.Publisher(self._status_topic, PoseServoStatus, queue_size=10)
 
         self._target_subscriber = rospy.Subscriber(self._target_topic, PoseStamped, self._target_callback, queue_size=1)
@@ -57,7 +60,12 @@ class PoseServoNode:
         rate = rospy.Rate(max(1.0, self._command_rate))
         while not rospy.is_shutdown():
             if not self._enabled:
-                self._publish_status(None, 0.0, 0.0, self._goal_reached_latched)
+                self._publish_status(
+                    self._last_current_pose,
+                    self._last_position_error,
+                    self._last_orientation_error,
+                    self._goal_reached_latched,
+                )
                 self._send_zero_twist_once()
                 rate.sleep()
                 continue
@@ -91,12 +99,14 @@ class PoseServoNode:
 
             if distance <= self._position_tolerance and orientation_error_norm <= self._orientation_tolerance:
                 self._goal_reached_latched = True
+                self._remember_status(current_pose, distance, orientation_error_norm)
                 self._publish_status(current_pose, distance, orientation_error_norm, True)
                 self._enabled = False
                 self._send_zero_twist_once()
                 rate.sleep()
                 continue
 
+            self._remember_status(current_pose, distance, orientation_error_norm)
             self._publish_status(current_pose, distance, orientation_error_norm, False)
 
             linear_speed = min(self._max_linear_speed, self._position_gain * distance)
@@ -150,6 +160,16 @@ class PoseServoNode:
         if current_pose is not None:
             status.current_pose = current_pose
         self._status_publisher.publish(status)
+
+    def _remember_status(
+        self,
+        current_pose: PoseStamped,
+        position_error: float,
+        orientation_error: float,
+    ) -> None:
+        self._last_current_pose = current_pose
+        self._last_position_error = float(position_error)
+        self._last_orientation_error = float(orientation_error)
 
     def _send_zero_twist_once(self) -> None:
         """

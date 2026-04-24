@@ -36,12 +36,6 @@ class ApplyYawCorrectionActionServer:
         self._action_name = str(rospy.get_param("~action_name", "apply_yaw_correction")).strip()
         self._move_action_name = str(rospy.get_param("~move_action_name", "move_to_pose")).strip()
         self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link"))
-        self._default_position_tolerance = float(
-            rospy.get_param("~motion/action_position_tolerance", 0.002)
-        )
-        self._default_orientation_tolerance = float(
-            rospy.get_param("~motion/action_orientation_tolerance", 0.05)
-        )
         self._default_settle_time = float(
             rospy.get_param("~motion/action_settle_time", 0.4)
         )
@@ -77,14 +71,6 @@ class ApplyYawCorrectionActionServer:
 
         move_goal = MoveToPoseGoal()
         move_goal.target_pose = corrected_pose
-        move_goal.position_tolerance = self._goal_or_default(
-            goal.position_tolerance,
-            self._default_position_tolerance,
-        )
-        move_goal.orientation_tolerance = self._goal_or_default(
-            goal.orientation_tolerance,
-            self._default_orientation_tolerance,
-        )
         move_goal.settle_time = self._goal_or_default(goal.settle_time, self._default_settle_time)
         move_goal.timeout = self._goal_or_default(goal.timeout, self._default_timeout)
 
@@ -100,12 +86,14 @@ class ApplyYawCorrectionActionServer:
         result = self._move_client.get_result()
         if result is None or not bool(result.success):
             message = result.message if result is not None else "no_result"
-            self._abort("move_goal_failed: %s" % message, corrected_pose)
+            error_code = result.error_code if result is not None else "move_goal_no_result"
+            self._abort("move_goal_failed: %s" % message, corrected_pose, error_code)
             return
 
         action_result = ApplyYawCorrectionResult()
         action_result.success = True
         action_result.message = "yaw_correction_applied"
+        action_result.error_code = ""
         action_result.corrected_pose = result.final_pose
         self._server.set_succeeded(action_result)
 
@@ -136,10 +124,16 @@ class ApplyYawCorrectionActionServer:
         feedback.stage = stage
         self._server.publish_feedback(feedback)
 
-    def _abort(self, message: str, corrected_pose: PoseStamped | None) -> None:
+    def _abort(
+        self,
+        message: str,
+        corrected_pose: PoseStamped | None,
+        error_code: str | None = None,
+    ) -> None:
         result = ApplyYawCorrectionResult()
         result.success = False
         result.message = str(message)
+        result.error_code = str(error_code or message)
         if corrected_pose is not None:
             result.corrected_pose = corrected_pose
         self._server.set_aborted(result)

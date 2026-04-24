@@ -68,8 +68,6 @@ class ProbeSurfaceActionServer:
         self._second_probe_y_offset = float(rospy.get_param("~probe/second_probe_y_offset", 0.02))
         self._inter_probe_backoff_distance = float(rospy.get_param("~probe/inter_probe_backoff_distance", 0.01))
         self._probe_timeout = float(rospy.get_param("~probe/probe_timeout", 10.0))
-        self._position_tolerance = float(rospy.get_param("~state_machine/position_tolerance", 0.002))
-        self._orientation_tolerance = float(rospy.get_param("~motion/action_orientation_tolerance", 0.05))
         self._settle_time = float(rospy.get_param("~motion/action_settle_time", 0.4))
         self._force_threshold_x = float(rospy.get_param("~contact/force_threshold_x", 2.0))
 
@@ -142,22 +140,23 @@ class ProbeSurfaceActionServer:
                 -0.5 * self._second_probe_y_offset,
             )
         except ValueError as exc:
-            self._abort(str(exc))
+            self._abort("compute_first_probe_offset_failed: %s" % exc, "compute_first_probe_offset_failed")
             return
         first_target_xyz = (
             nominal_probe_xyz[0] + first_lateral_offset[0],
             nominal_probe_xyz[1] + first_lateral_offset[1],
             nominal_probe_xyz[2],
         )
-        if not self._move_to_pose(first_target_xyz, target_orientation):
-            self._abort("move_to_first_probe_offset_failed")
+        move_success, move_error_code = self._move_to_pose(first_target_xyz, target_orientation)
+        if not move_success:
+            self._abort("move_to_first_probe_offset_failed", move_error_code)
             return
 
         self._publish_stage("probe_wall_point_1")
         try:
             probe_direction = self._get_probe_direction_from_tool_z(target_orientation)
         except ValueError as exc:
-            self._abort(str(exc))
+            self._abort("compute_probe_direction_failed: %s" % exc, "compute_probe_direction_failed")
             return
         contact_axis = self._dominant_axis_name(probe_direction)
         probe_result_1 = self._wall_probe.probe_until_contact(
@@ -167,7 +166,11 @@ class ProbeSurfaceActionServer:
             timeout=self._probe_timeout,
         )
         if not probe_result_1.success or probe_result_1.contact_point is None:
-            self._abort("probe_wall_point_1_failed")
+            self._abort(
+                "probe_wall_point_1_failed",
+                "probe_wall_point_1_%s" % probe_result_1.reason,
+                probe_result_1.reason,
+            )
             return
 
         self._publish_stage("move_to_second_probe_offset")
@@ -177,22 +180,23 @@ class ProbeSurfaceActionServer:
                 self._second_probe_y_offset,
             )
         except ValueError as exc:
-            self._abort(str(exc))
+            self._abort("compute_second_probe_offset_failed: %s" % exc, "compute_second_probe_offset_failed")
             return
         second_target_xyz = (
             probe_result_1.contact_point.point.x - probe_direction[0] * self._inter_probe_backoff_distance + lateral_offset[0],
             probe_result_1.contact_point.point.y - probe_direction[1] * self._inter_probe_backoff_distance + lateral_offset[1],
             probe_result_1.contact_point.point.z - probe_direction[2] * self._inter_probe_backoff_distance + lateral_offset[2],
         )
-        if not self._move_to_pose(second_target_xyz, target_orientation):
-            self._abort("move_to_second_probe_offset_failed")
+        move_success, move_error_code = self._move_to_pose(second_target_xyz, target_orientation)
+        if not move_success:
+            self._abort("move_to_second_probe_offset_failed", move_error_code)
             return
 
         self._publish_stage("probe_wall_point_2")
         try:
             probe_direction = self._get_probe_direction_from_tool_z(target_orientation)
         except ValueError as exc:
-            self._abort(str(exc))
+            self._abort("compute_probe_direction_failed: %s" % exc, "compute_probe_direction_failed")
             return
         contact_axis = self._dominant_axis_name(probe_direction)
         probe_result_2 = self._wall_probe.probe_until_contact(
@@ -202,7 +206,11 @@ class ProbeSurfaceActionServer:
             timeout=self._probe_timeout,
         )
         if not probe_result_2.success or probe_result_2.contact_point is None:
-            self._abort("probe_wall_point_2_failed")
+            self._abort(
+                "probe_wall_point_2_failed",
+                "probe_wall_point_2_%s" % probe_result_2.reason,
+                probe_result_2.reason,
+            )
             return
 
         self._publish_stage("estimate_wall_yaw")
@@ -212,10 +220,10 @@ class ProbeSurfaceActionServer:
                 probe_result_2.contact_point.point,
             )
         except ValueError as exc:
-            self._abort("estimate_wall_yaw_failed: %s" % exc)
+            self._abort("estimate_wall_yaw_failed: %s" % exc, "estimate_wall_yaw_failed")
             return
 
-        result = self._make_result(True, True, "surface_found")
+        result = self._make_result(True, True, "surface_found", "", "")
         result.yaw_correction_rad = float(self._compute_yaw_correction(port_quaternion, wall_estimate))
         result.contact_point_1 = probe_result_1.contact_point
         result.contact_point_2 = probe_result_2.contact_point
@@ -286,7 +294,7 @@ class ProbeSurfaceActionServer:
         )
         return correction
 
-    def _move_to_pose(self, target_xyz, target_quaternion) -> bool:
+    def _move_to_pose(self, target_xyz, target_quaternion) -> tuple[bool, str]:
         goal = MoveToPoseGoal()
         goal.target_pose = PoseStamped()
         goal.target_pose.header.stamp = rospy.Time.now()
@@ -298,8 +306,6 @@ class ProbeSurfaceActionServer:
         goal.target_pose.pose.orientation.y = target_quaternion[1]
         goal.target_pose.pose.orientation.z = target_quaternion[2]
         goal.target_pose.pose.orientation.w = target_quaternion[3]
-        goal.position_tolerance = self._position_tolerance
-        goal.orientation_tolerance = self._orientation_tolerance
         goal.settle_time = self._settle_time
         goal.timeout = self._probe_timeout
 
@@ -307,26 +313,45 @@ class ProbeSurfaceActionServer:
         finished = self._move_client.wait_for_result(rospy.Duration.from_sec(self._probe_timeout + 5.0))
         if not finished:
             self._move_client.cancel_goal()
-            return False
+            return False, "move_to_pose_wait_timeout"
 
         result = self._move_client.get_result()
-        return bool(result is not None and result.success)
+        if result is None:
+            return False, "move_to_pose_no_result"
+        if not result.success:
+            return False, result.error_code or result.message
+        return True, ""
 
     def _publish_stage(self, stage: str) -> None:
         feedback = ProbeSurfaceFeedback()
         feedback.stage = stage
         self._server.publish_feedback(feedback)
 
-    def _abort(self, message: str) -> None:
+    def _abort(
+        self,
+        message: str,
+        error_code: str | None = None,
+        failure_reason: str | None = None,
+    ) -> None:
         self._robot.stop_motion()
-        self._server.set_aborted(self._make_result(False, False, message))
+        self._server.set_aborted(
+            self._make_result(False, False, message, error_code or message, failure_reason or "")
+        )
 
     @staticmethod
-    def _make_result(success: bool, surface_found: bool, message: str) -> ProbeSurfaceResult:
+    def _make_result(
+        success: bool,
+        surface_found: bool,
+        message: str,
+        error_code: str,
+        failure_reason: str,
+    ) -> ProbeSurfaceResult:
         result = ProbeSurfaceResult()
         result.success = bool(success)
         result.surface_found = bool(surface_found)
         result.message = str(message)
+        result.error_code = str(error_code)
+        result.failure_reason = str(failure_reason)
         result.yaw_correction_rad = 0.0
         return result
 

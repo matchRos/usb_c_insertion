@@ -34,12 +34,7 @@ class MoveToPoseActionServer:
 
     def __init__(self):
         self._action_name = str(rospy.get_param("~action_name", "move_to_pose")).strip()
-        self._default_position_tolerance = float(
-            rospy.get_param("~motion/action_position_tolerance", 0.002)
-        )
-        self._default_orientation_tolerance = float(
-            rospy.get_param("~motion/action_orientation_tolerance", 0.05)
-        )
+        self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link")).strip()
         self._default_settle_time = float(
             rospy.get_param("~motion/action_settle_time", 0.4)
         )
@@ -52,6 +47,11 @@ class MoveToPoseActionServer:
         self._pipeline_wait_timeout = float(
             rospy.get_param("~motion/action_pipeline_wait_timeout", 2.0)
         )
+        self._enforce_workspace_limits = bool(
+            rospy.get_param("~motion/enforce_workspace_limits", True)
+        )
+        self._min_target_x = float(rospy.get_param("~motion/min_target_x", 0.0))
+        self._min_target_z = float(rospy.get_param("~motion/min_target_z", 0.0))
         self._status_topic = str(
             rospy.get_param("~topics/pose_servo_status", "/usb_c_insertion/pose_servo_status")
         ).strip()
@@ -77,6 +77,17 @@ class MoveToPoseActionServer:
         )
 
     def _execute(self, goal) -> None:
+        frame_id = goal.target_pose.header.frame_id.strip() or self._base_frame
+        if frame_id != self._base_frame:
+            self._robot.stop_motion()
+            self._set_aborted("unsupported_target_pose_frame", None)
+            return
+
+        if not self._is_target_allowed(goal.target_pose):
+            self._robot.stop_motion()
+            self._set_aborted("target_pose_not_allowed", None)
+            return
+
         if not self._robot.wait_for_motion_pipeline(
             timeout=self._pipeline_wait_timeout,
             require_pose_servo=True,
@@ -86,12 +97,6 @@ class MoveToPoseActionServer:
             return
 
         timeout = self._goal_or_default(goal.timeout, self._default_timeout)
-        position_tolerance = self._goal_or_default(
-            goal.position_tolerance, self._default_position_tolerance
-        )
-        orientation_tolerance = self._goal_or_default(
-            goal.orientation_tolerance, self._default_orientation_tolerance
-        )
         settle_time = self._goal_or_default(goal.settle_time, self._default_settle_time)
 
         self._robot.send_pose_target(
@@ -102,7 +107,7 @@ class MoveToPoseActionServer:
             goal.target_pose.pose.orientation.y,
             goal.target_pose.pose.orientation.z,
             goal.target_pose.pose.orientation.w,
-            frame_id=goal.target_pose.header.frame_id,
+            frame_id=frame_id,
         )
         self._robot.enable_pose_servo(True)
 
@@ -114,7 +119,7 @@ class MoveToPoseActionServer:
         while not rospy.is_shutdown():
             if self._server.is_preempt_requested():
                 self._robot.stop_motion()
-                self._server.set_preempted(self._make_result(False, "preempted", None))
+                self._server.set_preempted(self._make_result(False, "preempted", "preempted", None))
                 return
 
             status = self._latest_status
@@ -136,7 +141,7 @@ class MoveToPoseActionServer:
                 elif (rospy.Time.now() - settled_since).to_sec() >= settle_time:
                     self._robot.enable_pose_servo(False)
                     self._server.set_succeeded(
-                        self._make_result(True, "target_reached", status.current_pose)
+                        self._make_result(True, "target_reached", "", status.current_pose)
                     )
                     return
             else:
@@ -155,7 +160,7 @@ class MoveToPoseActionServer:
         self._robot.stop_motion()
 
     def _set_aborted(self, message: str, pose: Optional[PoseStamped]) -> None:
-        self._server.set_aborted(self._make_result(False, message, pose))
+        self._server.set_aborted(self._make_result(False, message, message, pose))
 
     def _status_callback(self, msg: PoseServoStatus) -> None:
         self._latest_status = msg
@@ -164,11 +169,25 @@ class MoveToPoseActionServer:
     def _goal_or_default(value: float, default: float) -> float:
         return float(value) if float(value) > 0.0 else float(default)
 
+    def _is_target_allowed(self, target_pose: PoseStamped) -> bool:
+        if not self._enforce_workspace_limits:
+            return True
+        return (
+            target_pose.pose.position.x >= self._min_target_x
+            and target_pose.pose.position.z >= self._min_target_z
+        )
+
     @staticmethod
-    def _make_result(success: bool, message: str, pose: Optional[PoseStamped]) -> MoveToPoseResult:
+    def _make_result(
+        success: bool,
+        message: str,
+        error_code: str,
+        pose: Optional[PoseStamped],
+    ) -> MoveToPoseResult:
         result = MoveToPoseResult()
         result.success = bool(success)
         result.message = str(message)
+        result.error_code = str(error_code)
         if pose is not None:
             result.final_pose = pose
         return result
