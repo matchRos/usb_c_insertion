@@ -23,8 +23,8 @@ class TwistControllerNode:
 
         self._command_rate = float(rospy.get_param("~motion/command_rate", 500.0))
         self._watchdog_timeout = float(rospy.get_param("~motion/watchdog_timeout", 0.1))
-        self._max_linear_speed = float(rospy.get_param("~motion/max_linear_speed", 0.01))
-        self._max_angular_speed = float(rospy.get_param("~motion/max_angular_speed", 0.05))
+        self._max_linear_speed = float(rospy.get_param("~motion/max_linear_speed", 0.1))
+        self._max_angular_speed = float(rospy.get_param("~motion/max_angular_speed", 0.25))
         self._max_linear_acceleration = float(rospy.get_param("~motion/max_linear_acceleration", 0.03))
         self._max_angular_acceleration = float(rospy.get_param("~motion/max_angular_acceleration", 0.15))
         self._twist_alpha = float(rospy.get_param("~motion/twist_smoothing_alpha", 0.25))

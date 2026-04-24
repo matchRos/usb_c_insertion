@@ -46,15 +46,6 @@ def main() -> None:
         msg.pose.orientation = transform.transform.rotation
 
         publisher.publish(msg)
-        rospy.loginfo_throttle(
-            2.0,
-            "[usb_c_insertion] event=camera_pose_published topic=%s frame=%s x=%.4f y=%.4f z=%.4f",
-            topic,
-            camera_frame,
-            msg.pose.position.x,
-            msg.pose.position.y,
-            msg.pose.position.z,
-        )
         rate.sleep()
 
 

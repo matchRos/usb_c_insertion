@@ -4,7 +4,7 @@ motion:
   search_speed: 0.003
   search_traverse_speed: 0.012
   move_speed: 0.05
-  max_linear_speed: 0.05
+  max_linear_speed: 0.1
   max_angular_speed: 0.2
   max_linear_acceleration: 0.035
   max_angular_acceleration: 0.15
@@ -89,7 +89,7 @@ state_machine:
   enabled: true
   auto_zero_ft: true
   log_debug: true
-  prepose_offset_tool_x: -0.1
+  prepose_offset_tool_x: -0.07
   prepose_offset_tool_y: -0.01
   prepose_offset_tool_z: -0.01
   precontact_offset_tool_x: -0.000

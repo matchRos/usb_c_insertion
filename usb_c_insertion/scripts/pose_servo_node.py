@@ -36,8 +36,8 @@ class PoseServoNode:
         self._orientation_gain = float(rospy.get_param("~motion/pose_servo_orientation_gain", 1.0))
         self._position_tolerance = float(rospy.get_param("~motion/pose_servo_position_tolerance", 0.0015))
         self._orientation_tolerance = float(rospy.get_param("~motion/pose_servo_orientation_tolerance", 0.03))
-        self._max_linear_speed = float(rospy.get_param("~motion/max_linear_speed", 0.01))
-        self._max_angular_speed = float(rospy.get_param("~motion/max_angular_speed", 0.05))
+        self._max_linear_speed = float(rospy.get_param("~motion/max_linear_speed", 0.1))
+        self._max_angular_speed = float(rospy.get_param("~motion/max_angular_speed", 0.25))
 
         self._tf = TFInterface()
         self._robot = RobotInterface()
