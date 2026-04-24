@@ -1,0 +1,21 @@
+geometry_msgs/PoseStamped port_pose
+geometry_msgs/PoseStamped reference_pose
+float32 timeout
+---
+bool success
+bool port_found
+string message
+string error_code
+string failure_reason
+geometry_msgs/PoseStamped found_pose
+geometry_msgs/PointStamped wall_contact_point
+float32 inserted_depth
+float32 contact_force
+uint32 completed_steps
+---
+string stage
+uint32 current_step
+uint32 total_steps
+float32 elapsed
+float32 inserted_depth
+float32 contact_force

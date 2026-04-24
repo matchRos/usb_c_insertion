@@ -74,6 +74,7 @@ add_action_files(
   ApplyYawCorrection.action
   MoveToPose.action
   ProbeSurface.action
+  SearchPort.action
 )
 
 ## Generate added messages and services with any dependencies listed here
@@ -182,6 +183,7 @@ catkin_install_python(PROGRAMS
   scripts/pose_servo_node.py
   scripts/probe_surface_action_server.py
   scripts/run_vision_service.py
+  scripts/search_port_action_server.py
   scripts/twist_controller_node.py
   scripts/vision_pose_publisher.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

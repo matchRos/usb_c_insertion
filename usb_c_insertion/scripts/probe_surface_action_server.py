@@ -40,28 +40,34 @@ class ProbeSurfaceActionServer:
         self._move_action_name = str(rospy.get_param("~move_action_name", "move_to_pose")).strip()
         self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link"))
 
-        self._probe_offset_tool_x = float(
+        self._target_offset_tool_x = float(
             rospy.get_param(
-                "~state_machine/probe_offset_tool_x",
+                "~state_machine/target_offset_tool_x",
                 rospy.get_param(
-                    "~state_machine/prepose_offset_tool_x",
-                    -float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0)),
+                    "~state_machine/probe_offset_tool_x",
+                    rospy.get_param(
+                        "~state_machine/prepose_offset_tool_x",
+                        -float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0)),
+                    ),
                 ),
             )
         )
-        self._probe_offset_tool_y = float(
+        self._target_offset_tool_y = float(
             rospy.get_param(
-                "~state_machine/probe_offset_tool_y",
+                "~state_machine/target_offset_tool_y",
                 rospy.get_param(
-                    "~state_machine/prepose_offset_tool_y",
-                    float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0)),
+                    "~state_machine/probe_offset_tool_y",
+                    rospy.get_param(
+                        "~state_machine/prepose_offset_tool_y",
+                        float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0)),
+                    ),
                 ),
             )
         )
         self._probe_offset_x, self._probe_offset_y, self._probe_offset_z = tool_offset_to_port_offset(
             (
-                self._probe_offset_tool_x,
-                self._probe_offset_tool_y,
+                self._target_offset_tool_x,
+                self._target_offset_tool_y,
                 0.0,
             )
         )

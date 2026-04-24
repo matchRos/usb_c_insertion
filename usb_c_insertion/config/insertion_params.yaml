@@ -1,5 +1,5 @@
 motion:
-  probe_speed: 0.008
+  probe_speed: 0.005
   retract_speed: 0.02
   search_speed: 0.003
   search_traverse_speed: 0.012
@@ -44,6 +44,8 @@ search:
   max_search_width: 0.02
   max_search_height: 0.02
   search_timeout: 50.0
+  traverse_timeout: 4.0
+  zero_ft_before_search: true
   contact_force_target: 2.0
   contact_force_tolerance: 0.5
   force_control_gain: 0.001
@@ -95,8 +97,8 @@ state_machine:
   enabled: true
   auto_zero_ft: true
   log_debug: true
-  probe_offset_tool_x: -0.03
-  probe_offset_tool_y: -0.01
+  target_offset_tool_x: -0.03
+  target_offset_tool_y: -0.01
   prepose_offset: -0.01
   precontact_offset_tool_x: -0.000
   precontact_offset_tool_y: 0.000

@@ -110,21 +110,27 @@ class InsertionStateMachine:
         self._port_qz = float(rospy.get_param("~port_estimate/qz", 0.0))
         self._port_qw = float(rospy.get_param("~port_estimate/qw", 1.0))
         self._vision_pose_json_path = str(rospy.get_param("~vision_pose_json_path", "")).strip()
-        self._probe_offset_tool_x = float(
+        self._target_offset_tool_x = float(
             rospy.get_param(
-                "~state_machine/probe_offset_tool_x",
+                "~state_machine/target_offset_tool_x",
                 rospy.get_param(
-                    "~state_machine/prepose_offset_tool_x",
-                    -float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0)),
+                    "~state_machine/probe_offset_tool_x",
+                    rospy.get_param(
+                        "~state_machine/prepose_offset_tool_x",
+                        -float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0)),
+                    ),
                 ),
             )
         )
-        self._probe_offset_tool_y = float(
+        self._target_offset_tool_y = float(
             rospy.get_param(
-                "~state_machine/probe_offset_tool_y",
+                "~state_machine/target_offset_tool_y",
                 rospy.get_param(
-                    "~state_machine/prepose_offset_tool_y",
-                    float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0)),
+                    "~state_machine/probe_offset_tool_y",
+                    rospy.get_param(
+                        "~state_machine/prepose_offset_tool_y",
+                        float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0)),
+                    ),
                 ),
             )
         )
@@ -143,8 +149,8 @@ class InsertionStateMachine:
             self._prepose_offset_port_z,
         ) = tool_offset_to_port_offset(
             (
-                self._probe_offset_tool_x,
-                self._probe_offset_tool_y,
+                self._target_offset_tool_x,
+                self._target_offset_tool_y,
                 self._prepose_offset,
             )
         )
@@ -154,8 +160,8 @@ class InsertionStateMachine:
             self._probe_offset_port_z,
         ) = tool_offset_to_port_offset(
             (
-                self._probe_offset_tool_x,
-                self._probe_offset_tool_y,
+                self._target_offset_tool_x,
+                self._target_offset_tool_y,
                 0.0,
             )
         )

@@ -21,6 +21,8 @@ from usb_c_insertion.msg import (
     MoveToPoseGoal,
     ProbeSurfaceAction,
     ProbeSurfaceGoal,
+    SearchPortAction,
+    SearchPortGoal,
 )
 from usb_c_insertion.srv import ComputePrePose, ComputePrePoseRequest, RunVision, RunVisionRequest
 
@@ -42,6 +44,9 @@ class PhotoPoseWorkflowExample:
         self._apply_yaw_action_name = str(
             rospy.get_param("~apply_yaw_action_name", "apply_yaw_correction")
         ).strip()
+        self._search_port_action_name = str(
+            rospy.get_param("~search_port_action_name", "search_port")
+        ).strip()
         self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link"))
 
         self._settle_time = float(rospy.get_param("~photo_pose/settle_time", 0.4))
@@ -54,6 +59,10 @@ class PhotoPoseWorkflowExample:
         self._apply_yaw_client = actionlib.SimpleActionClient(
             self._apply_yaw_action_name,
             ApplyYawCorrectionAction,
+        )
+        self._search_port_client = actionlib.SimpleActionClient(
+            self._search_port_action_name,
+            SearchPortAction,
         )
 
     def run(self) -> bool:
@@ -85,7 +94,11 @@ class PhotoPoseWorkflowExample:
         if yaw_correction is None:
             return False
 
-        return self._apply_yaw_correction(pre_pose, yaw_correction)
+        corrected_pose = self._apply_yaw_correction(pre_pose, yaw_correction)
+        if corrected_pose is None:
+            return False
+
+        return self._search_port(port_pose, corrected_pose)
 
     def _move_to_photo_pose(self) -> bool:
         return self._move_to_named_pose(self._goal, "photo_pose")
@@ -222,10 +235,14 @@ class PhotoPoseWorkflowExample:
         )
         return float(result.yaw_correction_rad)
 
-    def _apply_yaw_correction(self, reference_pose: PoseStamped, yaw_correction_rad: float) -> bool:
+    def _apply_yaw_correction(
+        self,
+        reference_pose: PoseStamped,
+        yaw_correction_rad: float,
+    ) -> PoseStamped | None:
         if not self._apply_yaw_client.wait_for_server(rospy.Duration.from_sec(5.0)):
             rospy.logerr("[usb_c_insertion] event=photo_pose_workflow_failed reason=apply_yaw_action_unavailable")
-            return False
+            return None
 
         goal = ApplyYawCorrectionGoal()
         goal.reference_pose = reference_pose
@@ -245,7 +262,7 @@ class PhotoPoseWorkflowExample:
         if not finished:
             self._apply_yaw_client.cancel_goal()
             rospy.logerr("[usb_c_insertion] event=photo_pose_workflow_failed reason=apply_yaw_action_timeout")
-            return False
+            return None
 
         result = self._apply_yaw_client.get_result()
         if result is None or not bool(result.success):
@@ -256,7 +273,7 @@ class PhotoPoseWorkflowExample:
                 error_code,
                 message,
             )
-            return False
+            return None
 
         rospy.loginfo(
             "[usb_c_insertion] event=apply_yaw_correction_complete x=%.4f y=%.4f z=%.4f",
@@ -264,7 +281,64 @@ class PhotoPoseWorkflowExample:
             result.corrected_pose.pose.position.y,
             result.corrected_pose.pose.position.z,
         )
-        return True
+        return result.corrected_pose
+
+    def _search_port(self, port_pose: PoseStamped, corrected_pose: PoseStamped) -> bool:
+        if not self._search_port_client.wait_for_server(rospy.Duration.from_sec(5.0)):
+            rospy.logerr("[usb_c_insertion] event=photo_pose_workflow_failed reason=search_port_action_unavailable")
+            return False
+
+        goal = SearchPortGoal()
+        goal.port_pose = port_pose
+        goal.reference_pose = corrected_pose
+        goal.timeout = float(
+            rospy.get_param(
+                "~photo_pose/search_timeout",
+                rospy.get_param("~search/search_timeout", 50.0),
+            )
+        )
+
+        rospy.loginfo("[usb_c_insertion] event=search_port_goal_sent")
+        self._search_port_client.send_goal(goal, feedback_cb=self._search_feedback_callback)
+        finished = self._search_port_client.wait_for_result(rospy.Duration.from_sec(max(1.0, goal.timeout + 15.0)))
+        if not finished:
+            self._search_port_client.cancel_goal()
+            rospy.logerr("[usb_c_insertion] event=photo_pose_workflow_failed reason=search_port_action_timeout")
+            return False
+
+        result = self._search_port_client.get_result()
+        if result is None or not bool(result.success):
+            message = result.message if result is not None else "no_result"
+            error_code = result.error_code if result is not None else "search_port_action_no_result"
+            failure_reason = result.failure_reason if result is not None else ""
+            rospy.logerr(
+                "[usb_c_insertion] event=photo_pose_workflow_failed reason=search_port_action_failed error_code=%s failure_reason=%s message=%s",
+                error_code,
+                failure_reason,
+                message,
+            )
+            return False
+
+        rospy.loginfo(
+            "[usb_c_insertion] event=search_port_complete port_found=%s inserted_depth=%.4f contact_force=%.3f completed_steps=%d",
+            str(bool(result.port_found)).lower(),
+            float(result.inserted_depth),
+            float(result.contact_force),
+            int(result.completed_steps),
+        )
+        return bool(result.port_found)
+
+    def _search_feedback_callback(self, feedback) -> None:
+        rospy.loginfo_throttle(
+            1.0,
+            "[usb_c_insertion] event=search_port_feedback stage=%s step=%d total=%d inserted_depth=%.4f contact_force=%.3f elapsed=%.2f",
+            feedback.stage,
+            int(feedback.current_step),
+            int(feedback.total_steps),
+            float(feedback.inserted_depth),
+            float(feedback.contact_force),
+            float(feedback.elapsed),
+        )
 
     def _load_goal_pose(self) -> PoseStamped:
         pose = PoseStamped()

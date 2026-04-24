@@ -21,21 +21,27 @@ class ComputePrePoseServiceNode:
     def __init__(self):
         self._service_name = str(rospy.get_param("~service_name", "compute_prepose")).strip()
         self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link"))
-        self._probe_offset_tool_x = float(
+        self._target_offset_tool_x = float(
             rospy.get_param(
-                "~state_machine/probe_offset_tool_x",
+                "~state_machine/target_offset_tool_x",
                 rospy.get_param(
-                    "~state_machine/prepose_offset_tool_x",
-                    -float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0)),
+                    "~state_machine/probe_offset_tool_x",
+                    rospy.get_param(
+                        "~state_machine/prepose_offset_tool_x",
+                        -float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0)),
+                    ),
                 ),
             )
         )
-        self._probe_offset_tool_y = float(
+        self._target_offset_tool_y = float(
             rospy.get_param(
-                "~state_machine/probe_offset_tool_y",
+                "~state_machine/target_offset_tool_y",
                 rospy.get_param(
-                    "~state_machine/prepose_offset_tool_y",
-                    float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0)),
+                    "~state_machine/probe_offset_tool_y",
+                    rospy.get_param(
+                        "~state_machine/prepose_offset_tool_y",
+                        float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0)),
+                    ),
                 ),
             )
         )
@@ -49,7 +55,7 @@ class ComputePrePoseServiceNode:
                 )
             )
         self._offset_x, self._offset_y, self._offset_z = tool_offset_to_port_offset(
-            (self._probe_offset_tool_x, self._probe_offset_tool_y, self._prepose_offset)
+            (self._target_offset_tool_x, self._target_offset_tool_y, self._prepose_offset)
         )
         self._tf = TFInterface()
         self._service = rospy.Service(self._service_name, ComputePrePose, self._handle_request)
