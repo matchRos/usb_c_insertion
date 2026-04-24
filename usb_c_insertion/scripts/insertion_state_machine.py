@@ -82,6 +82,7 @@ class InsertionStateMachine:
         self._probe_timeout = float(rospy.get_param("~probe/probe_timeout", 10.0))
         self._inter_probe_backoff_distance = float(rospy.get_param("~probe/inter_probe_backoff_distance", 0.01))
         self._second_probe_y_offset = float(rospy.get_param("~probe/second_probe_y_offset", 0.02))
+        self._probe_normal_direction_sign = float(rospy.get_param("~probe/normal_direction_sign", -1.0))
         self._retract_distance = float(rospy.get_param("~probe/retract_distance", 0.01))
         self._search_step_y = float(rospy.get_param("~search/step_y", 0.0015))
         self._search_step_z = float(rospy.get_param("~search/step_z", 0.0015))
@@ -238,15 +239,16 @@ class InsertionStateMachine:
 
     def _handle_probe_wall_point_1(self) -> None:
         target_orientation = self._compute_tcp_target_orientation()
-        first_probe_target_x, first_probe_target_y, first_probe_target_z = self._compute_port_frame_target(
+        nominal_probe_target_x, nominal_probe_target_y, nominal_probe_target_z = self._compute_port_frame_target(
             self._prepose_offset_port_x,
-            -0.5 * self._second_probe_y_offset,
+            0.0,
             self._prepose_offset_port_z,
         )
+        first_lateral_offset = self._compute_horizontal_plane_y_offset(-0.5 * self._second_probe_y_offset)
         if not self._move_to_xyz(
-            first_probe_target_x,
-            first_probe_target_y,
-            first_probe_target_z,
+            nominal_probe_target_x + first_lateral_offset[0],
+            nominal_probe_target_y + first_lateral_offset[1],
+            nominal_probe_target_z,
             speed=self._probe_speed,
             timeout=8.0,
             move_name="move_to_first_probe_offset",
@@ -255,7 +257,7 @@ class InsertionStateMachine:
             self._fail("move_to_first_probe_offset_failed")
             return
 
-        probe_direction = self._compute_port_frame_direction(1.0, 0.0, 0.0)
+        probe_direction = self._compute_probe_direction_from_plane_normal()
         contact_axis = self._dominant_axis_name(probe_direction)
         self._probe_result_1 = self._wall_probe.probe_until_contact(
             direction_xyz=probe_direction,
@@ -271,8 +273,8 @@ class InsertionStateMachine:
 
     def _handle_probe_wall_point_2(self) -> None:
         target_orientation = self._compute_tcp_target_orientation()
-        probe_direction = self._normalize_vector(self._compute_port_frame_direction(1.0, 0.0, 0.0))
-        lateral_offset = self._compute_port_frame_direction(0.0, self._second_probe_y_offset, 0.0)
+        probe_direction = self._compute_probe_direction_from_plane_normal()
+        lateral_offset = self._compute_horizontal_plane_y_offset(self._second_probe_y_offset)
         second_probe_target_x = (
             self._probe_result_1.contact_point.point.x
             - probe_direction[0] * self._inter_probe_backoff_distance
@@ -370,7 +372,7 @@ class InsertionStateMachine:
             self._fail("zero_ft_before_search_failed")
             return
 
-        probe_direction = self._compute_port_frame_direction(1.0, 0.0, 0.0)
+        probe_direction = self._compute_probe_direction_from_plane_normal()
         contact_axis = self._dominant_axis_name(probe_direction)
         result = self._wall_probe.probe_until_contact(
             direction_xyz=probe_direction,
@@ -948,13 +950,45 @@ class InsertionStateMachine:
             self._port_qw,
         )
 
+    def _compute_probe_direction_from_plane_normal(self):
+        return self._normalize_vector(
+            self._rotate_vector_by_quaternion(
+                self._probe_normal_direction_sign,
+                0.0,
+                0.0,
+                self._port_qx,
+                self._port_qy,
+                self._port_qz,
+                self._port_qw,
+            )
+        )
+
+    def _compute_horizontal_plane_y_offset(self, lateral_distance: float):
+        plane_y_direction = self._rotate_vector_by_quaternion(
+            0.0,
+            1.0,
+            0.0,
+            self._port_qx,
+            self._port_qy,
+            self._port_qz,
+            self._port_qw,
+        )
+        horizontal_direction = self._normalize_vector(
+            (plane_y_direction[0], plane_y_direction[1], 0.0)
+        )
+        return (
+            horizontal_direction[0] * lateral_distance,
+            horizontal_direction[1] * lateral_distance,
+            0.0,
+        )
+
     def _compute_tcp_target_orientation(self):
         """
         Build the desired TCP yaw from the perceived case plane.
 
         The plane x-axis points out of the case wall. For the approach pose we
-        use that projected direction directly as the TCP x-axis yaw reference
-        in the robot XY plane. Only the yaw around robot z matters here.
+        use the projected plane normal directly as the TCP yaw reference in the
+        robot XY plane. Only the yaw around robot z matters here.
         """
         current_pose = self._tf.get_tool_pose_in_base()
         if current_pose is None:
@@ -965,7 +999,7 @@ class InsertionStateMachine:
                 self._port_qw,
             )
 
-        plane_x_in_base = self._rotate_vector_by_quaternion(
+        plane_normal_in_base = self._rotate_vector_by_quaternion(
             1.0,
             0.0,
             0.0,
@@ -974,10 +1008,10 @@ class InsertionStateMachine:
             self._port_qz,
             self._port_qw,
         )
-        plane_x_yaw = math.atan2(plane_x_in_base[1], plane_x_in_base[0])
-        tcp_x_yaw = self._normalize_angle(plane_x_yaw)
+        desired_normal_yaw = math.atan2(plane_normal_in_base[1], plane_normal_in_base[0])
         current_roll, current_pitch, _ = self._euler_from_quaternion(current_pose.pose.orientation)
-        return self._quaternion_from_euler(current_roll, current_pitch, tcp_x_yaw)
+        target_yaw = self._normalize_angle(desired_normal_yaw)
+        return self._quaternion_from_euler(current_roll, current_pitch, target_yaw)
 
     def _fail(self, reason: str) -> None:
         self._failure_reason = reason

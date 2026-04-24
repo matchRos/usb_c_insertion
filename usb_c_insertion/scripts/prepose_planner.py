@@ -14,22 +14,14 @@ def compute_port_frame_target(port_pose_xyzw, offset_xyz):
 
 def compute_tcp_target_orientation(current_tool_quaternion_xyzw, port_quaternion_xyzw):
     """
-    Build the TCP yaw from the perceived case plane.
+    Build the desired tool orientation from the case frame.
 
-    The plane x-axis points out of the case wall. For the approach pose we use
-    that projected direction directly as the TCP x-axis yaw reference in the
-    robot XY plane. Only the yaw around robot z matters here.
+    Required convention:
+    - z_tool is opposite to x_case
+    - y_tool points upward against gravity
+    - x_tool follows from the right-handed frame
     """
-    target_yaw = compute_tcp_target_yaw(port_quaternion_xyzw)
-    roll, pitch, _ = euler_from_quaternion(current_tool_quaternion_xyzw)
-    return quaternion_from_euler(roll, pitch, target_yaw)
-
-
-def compute_tcp_target_yaw(port_quaternion_xyzw):
-    """
-    Return only the desired TCP yaw derived from the perceived case plane.
-    """
-    plane_x_in_base = rotate_vector_by_quaternion(
+    port_x_in_base = rotate_vector_by_quaternion(
         1.0,
         0.0,
         0.0,
@@ -38,8 +30,27 @@ def compute_tcp_target_yaw(port_quaternion_xyzw):
         port_quaternion_xyzw[2],
         port_quaternion_xyzw[3],
     )
-    plane_x_yaw = math.atan2(plane_x_in_base[1], plane_x_in_base[0])
-    return normalize_angle(plane_x_yaw)
+    tool_z_axis = normalize_vector(
+        (-port_x_in_base[0], -port_x_in_base[1], -port_x_in_base[2])
+    )
+    tool_y_axis = (0.0, 0.0, 1.0)
+    tool_x_axis = normalize_vector(cross(tool_y_axis, tool_z_axis))
+    tool_y_axis = normalize_vector(cross(tool_z_axis, tool_x_axis))
+    rotation_matrix = (
+        (tool_x_axis[0], tool_y_axis[0], tool_z_axis[0]),
+        (tool_x_axis[1], tool_y_axis[1], tool_z_axis[1]),
+        (tool_x_axis[2], tool_y_axis[2], tool_z_axis[2]),
+    )
+    return quaternion_from_rotation_matrix(rotation_matrix)
+
+
+def compute_tcp_target_yaw(port_quaternion_xyzw):
+    """
+    Return the yaw of the full desired tool orientation.
+    """
+    target_quaternion = compute_tcp_target_orientation((0.0, 0.0, 0.0, 1.0), port_quaternion_xyzw)
+    _, _, yaw = euler_from_quaternion(target_quaternion)
+    return normalize_angle(yaw)
 
 
 def rotate_vector_by_quaternion(
@@ -101,6 +112,21 @@ def normalize_quaternion(quaternion_xyzw):
     if norm <= 1e-9:
         return (0.0, 0.0, 0.0, 1.0)
     return tuple(component / norm for component in quaternion_xyzw)
+
+
+def normalize_vector(vector_xyz):
+    magnitude = math.sqrt(sum(component * component for component in vector_xyz))
+    if magnitude <= 1e-9:
+        raise ValueError("vector must be non-zero")
+    return tuple(component / magnitude for component in vector_xyz)
+
+
+def cross(vector_a, vector_b):
+    return (
+        vector_a[1] * vector_b[2] - vector_a[2] * vector_b[1],
+        vector_a[2] * vector_b[0] - vector_a[0] * vector_b[2],
+        vector_a[0] * vector_b[1] - vector_a[1] * vector_b[0],
+    )
 
 
 def quaternion_from_yaw(yaw_rad: float):

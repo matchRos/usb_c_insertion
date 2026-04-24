@@ -206,7 +206,7 @@ class PhotoPoseWorkflowExample:
         pose = PoseStamped()
         pose.header.frame_id = str(rospy.get_param("~photo_pose/frame_id", self._base_frame))
         pose.pose.position.x = float(rospy.get_param("~photo_pose/x", 0.50))
-        pose.pose.position.y = float(rospy.get_param("~photo_pose/y", -0.5))
+        pose.pose.position.y = float(rospy.get_param("~photo_pose/y", -0.6))
         pose.pose.position.z = float(rospy.get_param("~photo_pose/z", 0.3))
 
         qx = float(rospy.get_param("~photo_pose/qx", 0.708))

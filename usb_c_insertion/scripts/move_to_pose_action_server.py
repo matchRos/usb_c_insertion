@@ -45,7 +45,7 @@ class MoveToPoseActionServer:
             rospy.get_param("~motion/action_settle_time", 0.4)
         )
         self._default_timeout = float(
-            rospy.get_param("~motion/action_timeout", 30.0)
+            rospy.get_param("~motion/action_timeout", 60.0)
         )
         self._feedback_rate = float(
             rospy.get_param("~motion/action_feedback_rate", 20.0)

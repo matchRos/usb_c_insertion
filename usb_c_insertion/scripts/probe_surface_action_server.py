@@ -109,18 +109,45 @@ class ProbeSurfaceActionServer:
         )
 
         self._publish_stage("move_to_first_probe_offset")
-        first_target_xyz = compute_port_frame_target(
+        nominal_probe_xyz = compute_port_frame_target(
             port_pose_tuple,
-            (self._prepose_offset_x, -0.5 * self._second_probe_y_offset, self._prepose_offset_z),
+            (self._prepose_offset_x, 0.0, self._prepose_offset_z),
+        )
+        try:
+            first_lateral_offset = self._get_tool_lateral_offset(
+                target_orientation,
+                -0.5 * self._second_probe_y_offset,
+            )
+        except ValueError as exc:
+            self._abort(str(exc))
+            return
+        first_target_xyz = (
+            nominal_probe_xyz[0] + first_lateral_offset[0],
+            nominal_probe_xyz[1] + first_lateral_offset[1],
+            nominal_probe_xyz[2],
+        )
+        rospy.loginfo(
+            "[usb_c_insertion] event=probe_surface_first_target nominal_x=%.4f nominal_y=%.4f nominal_z=%.4f lateral_x=%.4f lateral_y=%.4f lateral_z=%.4f target_x=%.4f target_y=%.4f target_z=%.4f",
+            nominal_probe_xyz[0],
+            nominal_probe_xyz[1],
+            nominal_probe_xyz[2],
+            first_lateral_offset[0],
+            first_lateral_offset[1],
+            first_lateral_offset[2],
+            first_target_xyz[0],
+            first_target_xyz[1],
+            first_target_xyz[2],
         )
         if not self._move_to_pose(first_target_xyz, target_orientation):
             self._abort("move_to_first_probe_offset_failed")
             return
 
         self._publish_stage("probe_wall_point_1")
-        probe_direction = self._normalize_vector(
-            rotate_vector_by_quaternion(1.0, 0.0, 0.0, *port_quaternion)
-        )
+        try:
+            probe_direction = self._get_probe_direction_from_tool_z(target_orientation)
+        except ValueError as exc:
+            self._abort(str(exc))
+            return
         contact_axis = self._dominant_axis_name(probe_direction)
         probe_result_1 = self._wall_probe.probe_until_contact(
             direction_xyz=probe_direction,
@@ -131,19 +158,54 @@ class ProbeSurfaceActionServer:
         if not probe_result_1.success or probe_result_1.contact_point is None:
             self._abort("probe_wall_point_1_failed")
             return
+        rospy.loginfo(
+            "[usb_c_insertion] event=probe_surface_first_contact probe_dx=%.4f probe_dy=%.4f probe_dz=%.4f contact_x=%.4f contact_y=%.4f contact_z=%.4f",
+            probe_direction[0],
+            probe_direction[1],
+            probe_direction[2],
+            probe_result_1.contact_point.point.x,
+            probe_result_1.contact_point.point.y,
+            probe_result_1.contact_point.point.z,
+        )
 
         self._publish_stage("move_to_second_probe_offset")
-        lateral_offset = rotate_vector_by_quaternion(0.0, self._second_probe_y_offset, 0.0, *port_quaternion)
+        try:
+            lateral_offset = self._get_tool_lateral_offset(
+                target_orientation,
+                self._second_probe_y_offset,
+            )
+        except ValueError as exc:
+            self._abort(str(exc))
+            return
         second_target_xyz = (
             probe_result_1.contact_point.point.x - probe_direction[0] * self._inter_probe_backoff_distance + lateral_offset[0],
             probe_result_1.contact_point.point.y - probe_direction[1] * self._inter_probe_backoff_distance + lateral_offset[1],
             probe_result_1.contact_point.point.z - probe_direction[2] * self._inter_probe_backoff_distance + lateral_offset[2],
+        )
+        rospy.loginfo(
+            "[usb_c_insertion] event=probe_surface_second_target backoff=%.4f probe_dx=%.4f probe_dy=%.4f probe_dz=%.4f lateral_x=%.4f lateral_y=%.4f lateral_z=%.4f target_x=%.4f target_y=%.4f target_z=%.4f",
+            self._inter_probe_backoff_distance,
+            probe_direction[0],
+            probe_direction[1],
+            probe_direction[2],
+            lateral_offset[0],
+            lateral_offset[1],
+            lateral_offset[2],
+            second_target_xyz[0],
+            second_target_xyz[1],
+            second_target_xyz[2],
         )
         if not self._move_to_pose(second_target_xyz, target_orientation):
             self._abort("move_to_second_probe_offset_failed")
             return
 
         self._publish_stage("probe_wall_point_2")
+        try:
+            probe_direction = self._get_probe_direction_from_tool_z(target_orientation)
+        except ValueError as exc:
+            self._abort(str(exc))
+            return
+        contact_axis = self._dominant_axis_name(probe_direction)
         probe_result_2 = self._wall_probe.probe_until_contact(
             direction_xyz=probe_direction,
             axis_name=contact_axis,
@@ -165,10 +227,75 @@ class ProbeSurfaceActionServer:
             return
 
         result = self._make_result(True, True, "surface_found")
-        result.yaw_correction_rad = float(wall_estimate.wall_yaw)
+        result.yaw_correction_rad = float(self._compute_yaw_correction(port_quaternion, wall_estimate))
         result.contact_point_1 = probe_result_1.contact_point
         result.contact_point_2 = probe_result_2.contact_point
         self._server.set_succeeded(result)
+
+    def _get_probe_direction_from_tool_z(self, tool_quaternion):
+        direction = rotate_vector_by_quaternion(
+            0.0,
+            0.0,
+            1.0,
+            tool_quaternion[0],
+            tool_quaternion[1],
+            tool_quaternion[2],
+            tool_quaternion[3],
+        )
+        return self._normalize_vector(direction)
+
+    def _get_tool_lateral_offset(self, tool_quaternion, lateral_distance: float):
+        tool_x_direction = rotate_vector_by_quaternion(
+            1.0,
+            0.0,
+            0.0,
+            tool_quaternion[0],
+            tool_quaternion[1],
+            tool_quaternion[2],
+            tool_quaternion[3],
+        )
+        horizontal_direction = self._normalize_vector(
+            (tool_x_direction[0], tool_x_direction[1], 0.0)
+        )
+        rospy.loginfo(
+            "[usb_c_insertion] event=probe_surface_tool_axes tool_x_x=%.4f tool_x_y=%.4f tool_x_z=%.4f horizontal_x_x=%.4f horizontal_x_y=%.4f horizontal_x_z=%.4f lateral_distance=%.4f",
+            tool_x_direction[0],
+            tool_x_direction[1],
+            tool_x_direction[2],
+            horizontal_direction[0],
+            horizontal_direction[1],
+            horizontal_direction[2],
+            lateral_distance,
+        )
+        return (
+            horizontal_direction[0] * lateral_distance,
+            horizontal_direction[1] * lateral_distance,
+            0.0,
+        )
+
+    def _compute_yaw_correction(self, port_quaternion, wall_estimate) -> float:
+        vision_tangent = rotate_vector_by_quaternion(
+            0.0,
+            1.0,
+            0.0,
+            port_quaternion[0],
+            port_quaternion[1],
+            port_quaternion[2],
+            port_quaternion[3],
+        )
+        vision_tangent_yaw = math.atan2(vision_tangent[1], vision_tangent[0])
+        measured_tangent_yaw = math.atan2(
+            wall_estimate.wall_direction_y,
+            wall_estimate.wall_direction_x,
+        )
+        correction = self._normalize_line_angle(measured_tangent_yaw - vision_tangent_yaw)
+        rospy.loginfo(
+            "[usb_c_insertion] event=probe_surface_yaw_compare vision_tangent_yaw=%.4f measured_tangent_yaw=%.4f yaw_correction=%.4f",
+            vision_tangent_yaw,
+            measured_tangent_yaw,
+            correction,
+        )
+        return correction
 
     def _move_to_pose(self, target_xyz, target_quaternion) -> bool:
         goal = MoveToPoseGoal()
@@ -225,6 +352,18 @@ class ProbeSurfaceActionServer:
     def _dominant_axis_name(direction_xyz) -> str:
         abs_components = {"x": abs(direction_xyz[0]), "y": abs(direction_xyz[1]), "z": abs(direction_xyz[2])}
         return max(abs_components, key=abs_components.get)
+
+    @staticmethod
+    def _normalize_line_angle(angle_rad) -> float:
+        while angle_rad > math.pi:
+            angle_rad -= 2.0 * math.pi
+        while angle_rad < -math.pi:
+            angle_rad += 2.0 * math.pi
+        if angle_rad > 0.5 * math.pi:
+            angle_rad -= math.pi
+        elif angle_rad < -0.5 * math.pi:
+            angle_rad += math.pi
+        return angle_rad
 
 
 def main() -> None:
