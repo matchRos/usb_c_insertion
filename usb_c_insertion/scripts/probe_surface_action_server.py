@@ -40,29 +40,29 @@ class ProbeSurfaceActionServer:
         self._move_action_name = str(rospy.get_param("~move_action_name", "move_to_pose")).strip()
         self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link"))
 
-        self._prepose_offset_tool_x = float(
+        self._probe_offset_tool_x = float(
             rospy.get_param(
-                "~state_machine/prepose_offset_tool_x",
-                -float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0)),
+                "~state_machine/probe_offset_tool_x",
+                rospy.get_param(
+                    "~state_machine/prepose_offset_tool_x",
+                    -float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0)),
+                ),
             )
         )
-        self._prepose_offset_tool_y = float(
+        self._probe_offset_tool_y = float(
             rospy.get_param(
-                "~state_machine/prepose_offset_tool_y",
-                float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0)),
+                "~state_machine/probe_offset_tool_y",
+                rospy.get_param(
+                    "~state_machine/prepose_offset_tool_y",
+                    float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0)),
+                ),
             )
         )
-        self._prepose_offset_tool_z = float(
-            rospy.get_param(
-                "~state_machine/prepose_offset_tool_z",
-                -float(rospy.get_param("~state_machine/prepose_offset_port_x", -0.03)),
-            )
-        )
-        self._prepose_offset_x, self._prepose_offset_y, self._prepose_offset_z = tool_offset_to_port_offset(
+        self._probe_offset_x, self._probe_offset_y, self._probe_offset_z = tool_offset_to_port_offset(
             (
-                self._prepose_offset_tool_x,
-                self._prepose_offset_tool_y,
-                self._prepose_offset_tool_z,
+                self._probe_offset_tool_x,
+                self._probe_offset_tool_y,
+                0.0,
             )
         )
         self._second_probe_y_offset = float(rospy.get_param("~probe/second_probe_y_offset", 0.02))
@@ -134,7 +134,7 @@ class ProbeSurfaceActionServer:
         self._publish_stage("move_to_first_probe_offset")
         nominal_probe_xyz = compute_port_frame_target(
             port_pose_tuple,
-            (self._prepose_offset_x, 0.0, self._prepose_offset_z),
+            (self._probe_offset_x, self._probe_offset_y, self._probe_offset_z),
         )
         try:
             first_lateral_offset = self._get_tool_lateral_offset(

@@ -110,33 +110,53 @@ class InsertionStateMachine:
         self._port_qz = float(rospy.get_param("~port_estimate/qz", 0.0))
         self._port_qw = float(rospy.get_param("~port_estimate/qw", 1.0))
         self._vision_pose_json_path = str(rospy.get_param("~vision_pose_json_path", "")).strip()
-        self._prepose_offset_tool_x = float(
+        self._probe_offset_tool_x = float(
             rospy.get_param(
-                "~state_machine/prepose_offset_tool_x",
-                -float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0)),
+                "~state_machine/probe_offset_tool_x",
+                rospy.get_param(
+                    "~state_machine/prepose_offset_tool_x",
+                    -float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0)),
+                ),
             )
         )
-        self._prepose_offset_tool_y = float(
+        self._probe_offset_tool_y = float(
             rospy.get_param(
-                "~state_machine/prepose_offset_tool_y",
-                float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0)),
+                "~state_machine/probe_offset_tool_y",
+                rospy.get_param(
+                    "~state_machine/prepose_offset_tool_y",
+                    float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0)),
+                ),
             )
         )
-        self._prepose_offset_tool_z = float(
-            rospy.get_param(
-                "~state_machine/prepose_offset_tool_z",
-                -float(rospy.get_param("~state_machine/prepose_offset_port_x", -0.05)),
+        if rospy.has_param("~state_machine/prepose_offset"):
+            self._prepose_offset = float(rospy.get_param("~state_machine/prepose_offset"))
+        else:
+            self._prepose_offset = float(
+                rospy.get_param(
+                    "~state_machine/prepose_offset_tool_z",
+                    -float(rospy.get_param("~state_machine/prepose_offset_port_x", -0.05)),
+                )
             )
-        )
         (
             self._prepose_offset_port_x,
             self._prepose_offset_port_y,
             self._prepose_offset_port_z,
         ) = tool_offset_to_port_offset(
             (
-                self._prepose_offset_tool_x,
-                self._prepose_offset_tool_y,
-                self._prepose_offset_tool_z,
+                self._probe_offset_tool_x,
+                self._probe_offset_tool_y,
+                self._prepose_offset,
+            )
+        )
+        (
+            self._probe_offset_port_x,
+            self._probe_offset_port_y,
+            self._probe_offset_port_z,
+        ) = tool_offset_to_port_offset(
+            (
+                self._probe_offset_tool_x,
+                self._probe_offset_tool_y,
+                0.0,
             )
         )
         self._prepose_speed = float(rospy.get_param("~state_machine/prepose_speed", self._move_speed))
@@ -293,9 +313,9 @@ class InsertionStateMachine:
     def _handle_probe_wall_point_1(self) -> None:
         target_orientation = self._compute_tcp_target_orientation()
         nominal_probe_target_x, nominal_probe_target_y, nominal_probe_target_z = self._compute_port_frame_target(
-            self._prepose_offset_port_x,
-            0.0,
-            self._prepose_offset_port_z,
+            self._probe_offset_port_x,
+            self._probe_offset_port_y,
+            self._probe_offset_port_z,
         )
         first_lateral_offset = self._compute_horizontal_plane_y_offset(-0.5 * self._second_probe_y_offset)
         if not self._move_to_xyz(
