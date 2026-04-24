@@ -45,15 +45,6 @@ class ComputePrePoseServiceNode:
         self._tf = TFInterface()
         self._service = rospy.Service(self._service_name, ComputePrePose, self._handle_request)
         rospy.loginfo("[usb_c_insertion] event=compute_prepose_service_ready service=%s", self._service_name)
-        rospy.loginfo(
-            "[usb_c_insertion] event=compute_prepose_params offset_tool_x=%.4f offset_tool_y=%.4f offset_tool_z=%.4f offset_port_x=%.4f offset_port_y=%.4f offset_port_z=%.4f",
-            self._tool_offset_x,
-            self._tool_offset_y,
-            self._tool_offset_z,
-            self._offset_x,
-            self._offset_y,
-            self._offset_z,
-        )
 
     def _handle_request(self, request) -> ComputePrePoseResponse:
         response = ComputePrePoseResponse()

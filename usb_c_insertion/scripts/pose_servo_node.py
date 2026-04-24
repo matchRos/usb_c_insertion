@@ -69,10 +69,6 @@ class PoseServoNode:
 
             current_pose = self._tf.get_tool_pose_in_base()
             if current_pose is None:
-                rospy.logwarn_throttle(
-                    1.0,
-                    "[usb_c_insertion] event=pose_servo_missing_tf",
-                )
                 self._publish_status(None, 0.0, 0.0, False)
                 rate.sleep()
                 continue
@@ -96,11 +92,6 @@ class PoseServoNode:
             if distance <= self._position_tolerance and orientation_error_norm <= self._orientation_tolerance:
                 self._goal_reached_latched = True
                 self._publish_status(current_pose, distance, orientation_error_norm, True)
-                rospy.loginfo(
-                    "[usb_c_insertion] event=pose_servo_disabled_internal reason=tolerance_reached pos_err=%.4f ori_err=%.4f",
-                    distance,
-                    orientation_error_norm,
-                )
                 self._enabled = False
                 self._send_zero_twist_once()
                 rate.sleep()
@@ -126,18 +117,6 @@ class PoseServoNode:
                     self._orientation_gain * orientation_error[2],
                 )
             )
-            rospy.loginfo_throttle(
-                1.0,
-                "[usb_c_insertion] event=pose_servo_cmd vx=%.4f vy=%.4f vz=%.4f wx=%.4f wy=%.4f wz=%.4f pos_err=%.4f ori_err=%.4f",
-                vx,
-                vy,
-                vz,
-                angular_velocity[0],
-                angular_velocity[1],
-                angular_velocity[2],
-                distance,
-                orientation_error_norm,
-            )
             self._robot.send_twist(vx, vy, vz, angular_velocity[0], angular_velocity[1], angular_velocity[2])
             self._zero_twist_sent = False
             rate.sleep()
@@ -149,10 +128,6 @@ class PoseServoNode:
         self._goal_reached_latched = False
 
     def _enable_callback(self, msg: Bool) -> None:
-        if self._enabled and not bool(msg.data):
-            rospy.logwarn(
-                "[usb_c_insertion] event=pose_servo_disabled_external"
-            )
         self._enabled = bool(msg.data)
         if self._enabled:
             self._zero_twist_sent = False

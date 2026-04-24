@@ -94,17 +94,6 @@ class ProbeSurfaceActionServer:
         )
         self._server.start()
         rospy.loginfo("[usb_c_insertion] event=probe_surface_action_ready action=%s", self._action_name)
-        rospy.loginfo(
-            "[usb_c_insertion] event=probe_surface_params prepose_offset_tool_x=%.4f prepose_offset_tool_y=%.4f prepose_offset_tool_z=%.4f prepose_offset_port_x=%.4f prepose_offset_port_y=%.4f prepose_offset_port_z=%.4f second_probe_y_offset=%.4f inter_probe_backoff_distance=%.4f",
-            self._prepose_offset_tool_x,
-            self._prepose_offset_tool_y,
-            self._prepose_offset_tool_z,
-            self._prepose_offset_x,
-            self._prepose_offset_y,
-            self._prepose_offset_z,
-            self._second_probe_y_offset,
-            self._inter_probe_backoff_distance,
-        )
 
     def _execute(self, goal) -> None:
         if not self._move_client.wait_for_server(rospy.Duration.from_sec(5.0)):
@@ -160,18 +149,6 @@ class ProbeSurfaceActionServer:
             nominal_probe_xyz[1] + first_lateral_offset[1],
             nominal_probe_xyz[2],
         )
-        rospy.loginfo(
-            "[usb_c_insertion] event=probe_surface_first_target nominal_x=%.4f nominal_y=%.4f nominal_z=%.4f lateral_x=%.4f lateral_y=%.4f lateral_z=%.4f target_x=%.4f target_y=%.4f target_z=%.4f",
-            nominal_probe_xyz[0],
-            nominal_probe_xyz[1],
-            nominal_probe_xyz[2],
-            first_lateral_offset[0],
-            first_lateral_offset[1],
-            first_lateral_offset[2],
-            first_target_xyz[0],
-            first_target_xyz[1],
-            first_target_xyz[2],
-        )
         if not self._move_to_pose(first_target_xyz, target_orientation):
             self._abort("move_to_first_probe_offset_failed")
             return
@@ -192,15 +169,6 @@ class ProbeSurfaceActionServer:
         if not probe_result_1.success or probe_result_1.contact_point is None:
             self._abort("probe_wall_point_1_failed")
             return
-        rospy.loginfo(
-            "[usb_c_insertion] event=probe_surface_first_contact probe_dx=%.4f probe_dy=%.4f probe_dz=%.4f contact_x=%.4f contact_y=%.4f contact_z=%.4f",
-            probe_direction[0],
-            probe_direction[1],
-            probe_direction[2],
-            probe_result_1.contact_point.point.x,
-            probe_result_1.contact_point.point.y,
-            probe_result_1.contact_point.point.z,
-        )
 
         self._publish_stage("move_to_second_probe_offset")
         try:
@@ -215,19 +183,6 @@ class ProbeSurfaceActionServer:
             probe_result_1.contact_point.point.x - probe_direction[0] * self._inter_probe_backoff_distance + lateral_offset[0],
             probe_result_1.contact_point.point.y - probe_direction[1] * self._inter_probe_backoff_distance + lateral_offset[1],
             probe_result_1.contact_point.point.z - probe_direction[2] * self._inter_probe_backoff_distance + lateral_offset[2],
-        )
-        rospy.loginfo(
-            "[usb_c_insertion] event=probe_surface_second_target backoff=%.4f probe_dx=%.4f probe_dy=%.4f probe_dz=%.4f lateral_x=%.4f lateral_y=%.4f lateral_z=%.4f target_x=%.4f target_y=%.4f target_z=%.4f",
-            self._inter_probe_backoff_distance,
-            probe_direction[0],
-            probe_direction[1],
-            probe_direction[2],
-            lateral_offset[0],
-            lateral_offset[1],
-            lateral_offset[2],
-            second_target_xyz[0],
-            second_target_xyz[1],
-            second_target_xyz[2],
         )
         if not self._move_to_pose(second_target_xyz, target_orientation):
             self._abort("move_to_second_probe_offset_failed")
