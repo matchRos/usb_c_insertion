@@ -1,16 +1,11 @@
 <launch>
-  <node pkg="usb_c_insertion"
+  <arg name="start_twist_controller" default="false" />
+  <arg name="auto_zero_ft" default="true" />
+
+  <node if="$(arg start_twist_controller)"
+        pkg="usb_c_insertion"
         type="twist_controller_node.py"
         name="usb_c_insertion_twist_controller"
-        output="screen">
-    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
-  </node>
-
-  <node pkg="usb_c_insertion"
-        type="pose_servo_node.py"
-        name="usb_c_insertion_pose_servo"
         output="screen">
     <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
     <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
@@ -24,5 +19,6 @@
     <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
     <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
     <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+    <param name="extract/auto_zero_ft" value="$(arg auto_zero_ft)" />
   </node>
 </launch>

@@ -30,12 +30,14 @@ def main() -> None:
 
     if not robot.wait_for_motion_pipeline(timeout=3.0, require_pose_servo=False):
         rospy.logerr("[usb_c_insertion] event=extract_cable_failed reason=motion_pipeline_not_ready")
-        return
+        sys.exit(1)
 
-    if not ft_interface.zero_sensor():
-        rospy.logerr("[usb_c_insertion] event=extract_cable_failed reason=zero_ft_failed")
-        return
-    rospy.sleep(0.5)
+    auto_zero_ft = bool(rospy.get_param("~extract/auto_zero_ft", True))
+    if auto_zero_ft:
+        if not ft_interface.zero_sensor():
+            rospy.logerr("[usb_c_insertion] event=extract_cable_failed reason=zero_ft_failed")
+            sys.exit(1)
+        rospy.sleep(0.5)
 
     result = controller.extract()
     if result.success:
@@ -56,6 +58,7 @@ def main() -> None:
         result.lateral_force,
         result.torque_norm,
     )
+    sys.exit(1)
 
 
 if __name__ == "__main__":

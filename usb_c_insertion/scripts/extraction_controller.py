@@ -142,7 +142,15 @@ class ExtractionController:
             vx = extraction_direction[0] * bounded_pull_speed + tool_y_direction[0] * tool_y_velocity
             vy = extraction_direction[1] * bounded_pull_speed + tool_y_direction[1] * tool_y_velocity
             vz = extraction_direction[2] * bounded_pull_speed + tool_y_direction[2] * tool_y_velocity
-            print(f"pull_speed={bounded_pull_speed:.4f} tool_y_velocity={tool_y_velocity:.4f} tool_z_velocity={tool_z_velocity:.4f} vx={vx:.4f} vy={vy:.4f} vz={vz:.4f}")
+            rospy.loginfo_throttle(
+                0.5,
+                "[usb_c_insertion] event=extract_progress extracted_distance=%.4f pull_force=%.3f lateral_force=%.3f torque_norm=%.3f pull_speed=%.4f",
+                extracted_distance,
+                pull_force,
+                lateral_force,
+                torque_norm,
+                bounded_pull_speed,
+            )
             self._robot.send_twist(vx, vy, vz, 0.0, 0.0, 0.0)
             rate.sleep()
 
