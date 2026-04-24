@@ -71,6 +71,7 @@ add_service_files(
 ## Generate actions in the 'action' folder
 add_action_files(
   FILES
+  ApplyYawCorrection.action
   MoveToPose.action
   ProbeSurface.action
 )
@@ -171,6 +172,7 @@ include_directories(
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
 catkin_install_python(PROGRAMS
+  scripts/apply_yaw_correction_action_server.py
   scripts/camera_pose_publisher.py
   scripts/compute_prepose_service.py
   scripts/extract_cable.py
