@@ -16,7 +16,7 @@ if SCRIPT_DIR not in sys.path:
 
 from contact_detector import ContactDetector
 from ft_interface import FTInterface
-from prepose_planner import compute_port_frame_target, compute_tcp_target_orientation, rotate_vector_by_quaternion
+from prepose_planner import compute_port_frame_target, compute_tcp_target_orientation, rotate_vector_by_quaternion, tool_offset_to_port_offset
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
 from usb_c_insertion.msg import (
@@ -40,8 +40,31 @@ class ProbeSurfaceActionServer:
         self._move_action_name = str(rospy.get_param("~move_action_name", "move_to_pose")).strip()
         self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link"))
 
-        self._prepose_offset_x = float(rospy.get_param("~state_machine/prepose_offset_port_x", -0.03))
-        self._prepose_offset_z = float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0))
+        self._prepose_offset_tool_x = float(
+            rospy.get_param(
+                "~state_machine/prepose_offset_tool_x",
+                -float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0)),
+            )
+        )
+        self._prepose_offset_tool_y = float(
+            rospy.get_param(
+                "~state_machine/prepose_offset_tool_y",
+                float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0)),
+            )
+        )
+        self._prepose_offset_tool_z = float(
+            rospy.get_param(
+                "~state_machine/prepose_offset_tool_z",
+                -float(rospy.get_param("~state_machine/prepose_offset_port_x", -0.03)),
+            )
+        )
+        self._prepose_offset_x, self._prepose_offset_y, self._prepose_offset_z = tool_offset_to_port_offset(
+            (
+                self._prepose_offset_tool_x,
+                self._prepose_offset_tool_y,
+                self._prepose_offset_tool_z,
+            )
+        )
         self._second_probe_y_offset = float(rospy.get_param("~probe/second_probe_y_offset", 0.02))
         self._inter_probe_backoff_distance = float(rospy.get_param("~probe/inter_probe_backoff_distance", 0.01))
         self._probe_timeout = float(rospy.get_param("~probe/probe_timeout", 10.0))
@@ -71,6 +94,17 @@ class ProbeSurfaceActionServer:
         )
         self._server.start()
         rospy.loginfo("[usb_c_insertion] event=probe_surface_action_ready action=%s", self._action_name)
+        rospy.loginfo(
+            "[usb_c_insertion] event=probe_surface_params prepose_offset_tool_x=%.4f prepose_offset_tool_y=%.4f prepose_offset_tool_z=%.4f prepose_offset_port_x=%.4f prepose_offset_port_y=%.4f prepose_offset_port_z=%.4f second_probe_y_offset=%.4f inter_probe_backoff_distance=%.4f",
+            self._prepose_offset_tool_x,
+            self._prepose_offset_tool_y,
+            self._prepose_offset_tool_z,
+            self._prepose_offset_x,
+            self._prepose_offset_y,
+            self._prepose_offset_z,
+            self._second_probe_y_offset,
+            self._inter_probe_backoff_distance,
+        )
 
     def _execute(self, goal) -> None:
         if not self._move_client.wait_for_server(rospy.Duration.from_sec(5.0)):

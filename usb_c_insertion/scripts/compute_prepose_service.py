@@ -12,7 +12,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
-from prepose_planner import compute_port_frame_target, compute_tcp_target_orientation
+from prepose_planner import compute_port_frame_target, compute_tcp_target_orientation, tool_offset_to_port_offset
 from tf_interface import TFInterface
 from usb_c_insertion.srv import ComputePrePose, ComputePrePoseResponse
 
@@ -21,12 +21,39 @@ class ComputePrePoseServiceNode:
     def __init__(self):
         self._service_name = str(rospy.get_param("~service_name", "compute_prepose")).strip()
         self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link"))
-        self._offset_x = float(rospy.get_param("~state_machine/prepose_offset_port_x", -0.03))
-        self._offset_y = float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0))
-        self._offset_z = float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0))
+        self._tool_offset_x = float(
+            rospy.get_param(
+                "~state_machine/prepose_offset_tool_x",
+                -float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0)),
+            )
+        )
+        self._tool_offset_y = float(
+            rospy.get_param(
+                "~state_machine/prepose_offset_tool_y",
+                float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0)),
+            )
+        )
+        self._tool_offset_z = float(
+            rospy.get_param(
+                "~state_machine/prepose_offset_tool_z",
+                -float(rospy.get_param("~state_machine/prepose_offset_port_x", -0.03)),
+            )
+        )
+        self._offset_x, self._offset_y, self._offset_z = tool_offset_to_port_offset(
+            (self._tool_offset_x, self._tool_offset_y, self._tool_offset_z)
+        )
         self._tf = TFInterface()
         self._service = rospy.Service(self._service_name, ComputePrePose, self._handle_request)
         rospy.loginfo("[usb_c_insertion] event=compute_prepose_service_ready service=%s", self._service_name)
+        rospy.loginfo(
+            "[usb_c_insertion] event=compute_prepose_params offset_tool_x=%.4f offset_tool_y=%.4f offset_tool_z=%.4f offset_port_x=%.4f offset_port_y=%.4f offset_port_z=%.4f",
+            self._tool_offset_x,
+            self._tool_offset_y,
+            self._tool_offset_z,
+            self._offset_x,
+            self._offset_y,
+            self._offset_z,
+        )
 
     def _handle_request(self, request) -> ComputePrePoseResponse:
         response = ComputePrePoseResponse()
@@ -55,6 +82,11 @@ class ComputePrePoseServiceNode:
                     port_pose.pose.orientation.w,
                 ),
                 (self._offset_x, self._offset_y, self._offset_z),
+            )
+            rotated_offset_xyz = (
+                target_xyz[0] - port_pose.pose.position.x,
+                target_xyz[1] - port_pose.pose.position.y,
+                target_xyz[2] - port_pose.pose.position.z,
             )
             target_quaternion = compute_tcp_target_orientation(
                 (
@@ -90,10 +122,13 @@ class ComputePrePoseServiceNode:
         response.message = "prepose_ready"
         response.pre_pose = pre_pose
         rospy.loginfo(
-            "[usb_c_insertion] event=prepose_computed x=%.4f y=%.4f z=%.4f",
+            "[usb_c_insertion] event=prepose_computed x=%.4f y=%.4f z=%.4f applied_offset_base_x=%.4f applied_offset_base_y=%.4f applied_offset_base_z=%.4f",
             pre_pose.pose.position.x,
             pre_pose.pose.position.y,
             pre_pose.pose.position.z,
+            rotated_offset_xyz[0],
+            rotated_offset_xyz[1],
+            rotated_offset_xyz[2],
         )
         return response
 

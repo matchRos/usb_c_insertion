@@ -12,6 +12,23 @@ def compute_port_frame_target(port_pose_xyzw, offset_xyz):
     return (px + rx, py + ry, pz + rz)
 
 
+def tool_offset_to_port_offset(tool_offset_xyz):
+    """
+    Convert a tool-frame offset into the port/case frame convention.
+
+    Convention:
+    - x_port = -z_tool
+    - y_port = -x_tool
+    - z_port = +y_tool
+    """
+    tool_x, tool_y, tool_z = tool_offset_xyz
+    return (
+        -tool_z,
+        -tool_x,
+        tool_y,
+    )
+
+
 def compute_tcp_target_orientation(current_tool_quaternion_xyzw, port_quaternion_xyzw):
     """
     Build the desired tool orientation from the case frame.

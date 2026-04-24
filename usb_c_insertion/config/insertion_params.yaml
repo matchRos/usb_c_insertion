@@ -3,8 +3,8 @@ motion:
   retract_speed: 0.02
   search_speed: 0.003
   search_traverse_speed: 0.012
-  move_speed: 0.02
-  max_linear_speed: 0.03
+  move_speed: 0.05
+  max_linear_speed: 0.05
   max_angular_speed: 0.2
   max_linear_acceleration: 0.035
   max_angular_acceleration: 0.15
@@ -14,7 +14,7 @@ motion:
   pose_servo_orientation_gain: 1.0
   pose_servo_position_tolerance: 0.0015
   pose_servo_orientation_tolerance: 0.03
-  pose_servo_target_timeout: 10.0
+  pose_servo_target_timeout: 15.0
   command_rate: 500.0
 
 contact:
@@ -28,7 +28,7 @@ contact:
 probe:
   retract_distance: 0.005
   inter_probe_backoff_distance: 0.01
-  second_probe_y_offset: 0.02
+  second_probe_y_offset: 0.04
   max_probe_distance: 0.2
   probe_timeout: 20.0
 
@@ -89,3 +89,18 @@ state_machine:
   enabled: true
   auto_zero_ft: true
   log_debug: true
+  prepose_offset_tool_x: -0.1
+  prepose_offset_tool_y: -0.01
+  prepose_offset_tool_z: -0.01
+  precontact_offset_tool_x: -0.000
+  precontact_offset_tool_y: 0.000
+  precontact_offset_tool_z: 0.010
+  prepose_speed: 0.035
+  prepose_timeout: 30.0
+  position_tolerance: 0.002
+
+workflow:
+  photo_pose_max_linear_speed: 0.12
+  photo_pose_max_angular_speed: 0.35
+  prepose_max_linear_speed: 0.10
+  prepose_max_angular_speed: 0.30

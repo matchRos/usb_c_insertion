@@ -19,6 +19,7 @@ from extraction_controller import ExtractionController
 from ft_interface import FTInterface
 from insertion_controller import InsertionController
 from post_insertion_verifier import PostInsertionVerifier
+from prepose_planner import tool_offset_to_port_offset
 from robot_interface import RobotInterface
 from search_pattern import generate_raster_pattern
 from tf_interface import TFInterface
@@ -109,14 +110,66 @@ class InsertionStateMachine:
         self._port_qz = float(rospy.get_param("~port_estimate/qz", 0.0))
         self._port_qw = float(rospy.get_param("~port_estimate/qw", 1.0))
         self._vision_pose_json_path = str(rospy.get_param("~vision_pose_json_path", "")).strip()
-        self._prepose_offset_port_x = float(rospy.get_param("~state_machine/prepose_offset_port_x", -0.05))
-        self._prepose_offset_port_y = float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0))
-        self._prepose_offset_port_z = float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0))
+        self._prepose_offset_tool_x = float(
+            rospy.get_param(
+                "~state_machine/prepose_offset_tool_x",
+                -float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0)),
+            )
+        )
+        self._prepose_offset_tool_y = float(
+            rospy.get_param(
+                "~state_machine/prepose_offset_tool_y",
+                float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0)),
+            )
+        )
+        self._prepose_offset_tool_z = float(
+            rospy.get_param(
+                "~state_machine/prepose_offset_tool_z",
+                -float(rospy.get_param("~state_machine/prepose_offset_port_x", -0.05)),
+            )
+        )
+        (
+            self._prepose_offset_port_x,
+            self._prepose_offset_port_y,
+            self._prepose_offset_port_z,
+        ) = tool_offset_to_port_offset(
+            (
+                self._prepose_offset_tool_x,
+                self._prepose_offset_tool_y,
+                self._prepose_offset_tool_z,
+            )
+        )
         self._prepose_speed = float(rospy.get_param("~state_machine/prepose_speed", self._move_speed))
         self._prepose_timeout = float(rospy.get_param("~state_machine/prepose_timeout", 30.0))
-        self._precontact_offset_port_x = float(rospy.get_param("~state_machine/precontact_offset_port_x", -0.01))
-        self._precontact_offset_port_y = float(rospy.get_param("~state_machine/precontact_offset_port_y", 0.0))
-        self._precontact_offset_port_z = float(rospy.get_param("~state_machine/precontact_offset_port_z", 0.0))
+        self._precontact_offset_tool_x = float(
+            rospy.get_param(
+                "~state_machine/precontact_offset_tool_x",
+                -float(rospy.get_param("~state_machine/precontact_offset_port_y", 0.0)),
+            )
+        )
+        self._precontact_offset_tool_y = float(
+            rospy.get_param(
+                "~state_machine/precontact_offset_tool_y",
+                float(rospy.get_param("~state_machine/precontact_offset_port_z", 0.0)),
+            )
+        )
+        self._precontact_offset_tool_z = float(
+            rospy.get_param(
+                "~state_machine/precontact_offset_tool_z",
+                -float(rospy.get_param("~state_machine/precontact_offset_port_x", -0.01)),
+            )
+        )
+        (
+            self._precontact_offset_port_x,
+            self._precontact_offset_port_y,
+            self._precontact_offset_port_z,
+        ) = tool_offset_to_port_offset(
+            (
+                self._precontact_offset_tool_x,
+                self._precontact_offset_tool_y,
+                self._precontact_offset_tool_z,
+            )
+        )
         self._yaw_alignment_gain = float(rospy.get_param("~state_machine/yaw_alignment_gain", 0.8))
         self._yaw_tolerance = float(rospy.get_param("~state_machine/yaw_tolerance", 0.03))
         self._position_tolerance = float(rospy.get_param("~state_machine/position_tolerance", 0.002))
