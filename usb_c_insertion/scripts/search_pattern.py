@@ -129,6 +129,63 @@ def generate_expanding_square_pattern(step: float, max_radius: float) -> List[Pl
                 leg_length += 1
 
 
+def generate_preferred_square_spiral_pattern(
+    step_x: float,
+    step_y: float,
+    width: float,
+    height: float,
+    preferred_x_sign: float = 1.0,
+    preferred_y_sign: float = 1.0,
+) -> List[PlanarOffset]:
+    """
+    Generate a rectangular square spiral around the origin.
+
+    The first leg follows the preferred x direction and the second leg follows
+    the preferred y direction, so likely quadrants can be checked early while
+    the path still expands continuously around the estimated port position.
+    """
+    _validate_inputs(step_x, step_y, width, height)
+
+    half_width = width * 0.5 + 1e-9
+    half_height = height * 0.5 + 1e-9
+    preferred_x_sign = _normalize_sign(preferred_x_sign)
+    preferred_y_sign = _normalize_sign(preferred_y_sign)
+
+    directions = (
+        (preferred_x_sign, 0.0),
+        (0.0, preferred_y_sign),
+        (-preferred_x_sign, 0.0),
+        (0.0, -preferred_y_sign),
+    )
+
+    absolute_points = [(0.0, 0.0)]
+    visited_points = {(0.0, 0.0)}
+    current_x = 0.0
+    current_y = 0.0
+    leg_length = 1
+    direction_index = 0
+    consecutive_outside_legs = 0
+
+    while consecutive_outside_legs < 4:
+        direction_x, direction_y = directions[direction_index % 4]
+        leg_added_point = False
+        for _ in range(leg_length):
+            current_x = round(current_x + direction_x * step_x, 10)
+            current_y = round(current_y + direction_y * step_y, 10)
+            point = (current_x, current_y)
+            if abs(current_x) <= half_width and abs(current_y) <= half_height and point not in visited_points:
+                absolute_points.append(point)
+                visited_points.add(point)
+                leg_added_point = True
+
+        consecutive_outside_legs = 0 if leg_added_point else consecutive_outside_legs + 1
+        direction_index += 1
+        if direction_index % 2 == 0:
+            leg_length += 1
+
+    return _to_incremental_offsets(absolute_points)
+
+
 def generate_expanding_circle_pattern(
     radial_step: float,
     max_radius_x: float,

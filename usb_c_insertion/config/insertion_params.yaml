@@ -43,6 +43,7 @@ probe:
   probe_timeout: 20.0
 
 search:
+  pattern: "spiral"
   step_y: 0.002
   step_z: 0.0015
   max_search_width: 0.015

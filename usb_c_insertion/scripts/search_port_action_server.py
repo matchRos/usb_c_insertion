@@ -19,7 +19,7 @@ from contact_detector import ContactDetector
 from ft_interface import FTInterface
 from prepose_planner import rotate_vector_by_quaternion
 from robot_interface import RobotInterface
-from search_pattern import generate_centered_raster_pattern
+from search_pattern import generate_centered_raster_pattern, generate_preferred_square_spiral_pattern
 from tf_interface import TFInterface
 from usb_c_insertion.msg import (
     MoveToPoseAction,
@@ -38,7 +38,7 @@ class SearchPortActionServer:
     The action assumes the TCP orientation has already been corrected. It uses
     the supplied reference pose orientation, moves to a precontact pose around
     the estimated port position, probes the wall, then executes a conservative
-    raster in the wall plane while maintaining light contact.
+    search pattern in the wall plane while maintaining light contact.
     """
 
     def __init__(self):
@@ -46,6 +46,7 @@ class SearchPortActionServer:
         self._move_action_name = str(rospy.get_param("~move_action_name", "move_to_pose")).strip()
         self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link")).strip()
 
+        self._search_pattern = str(rospy.get_param("~search/pattern", "spiral")).strip().lower()
         self._search_step_y = float(rospy.get_param("~search/step_y", 0.001))
         self._search_step_z = float(rospy.get_param("~search/step_z", 0.001))
         self._search_width = float(rospy.get_param("~search/max_search_width", 0.02))
@@ -233,21 +234,14 @@ class SearchPortActionServer:
             return
 
         try:
-            pattern = generate_centered_raster_pattern(
-                step_x=self._search_step_y,
-                step_y=self._search_step_z,
-                width=self._search_width,
-                height=self._search_height,
-                preferred_x_sign=self._search_preferred_tool_x_sign,
-                preferred_y_sign=self._search_preferred_z_sign,
-                diagonal_first=self._search_diagonal_first,
-            )
+            pattern = self._generate_search_pattern()
         except ValueError as exc:
             self._abort("search_pattern_invalid: %s" % exc, "search_pattern_invalid")
             return
         if pattern:
             rospy.loginfo(
-                "[usb_c_insertion] event=search_pattern_ready steps=%d first_dx=%.4f first_dz=%.4f preferred_tool_x_sign=%.1f preferred_z_sign=%.1f diagonal_first=%s",
+                "[usb_c_insertion] event=search_pattern_ready pattern=%s steps=%d first_dx=%.4f first_dz=%.4f preferred_tool_x_sign=%.1f preferred_z_sign=%.1f diagonal_first=%s",
+                self._search_pattern,
                 len(pattern),
                 pattern[0].dx,
                 pattern[0].dy,
@@ -414,6 +408,28 @@ class SearchPortActionServer:
             port_pose.pose.position.y + offset[1],
             port_pose.pose.position.z + offset[2],
         )
+
+    def _generate_search_pattern(self):
+        if self._search_pattern == "spiral":
+            return generate_preferred_square_spiral_pattern(
+                step_x=self._search_step_y,
+                step_y=self._search_step_z,
+                width=self._search_width,
+                height=self._search_height,
+                preferred_x_sign=self._search_preferred_tool_x_sign,
+                preferred_y_sign=self._search_preferred_z_sign,
+            )
+        if self._search_pattern == "raster":
+            return generate_centered_raster_pattern(
+                step_x=self._search_step_y,
+                step_y=self._search_step_z,
+                width=self._search_width,
+                height=self._search_height,
+                preferred_x_sign=self._search_preferred_tool_x_sign,
+                preferred_y_sign=self._search_preferred_z_sign,
+                diagonal_first=self._search_diagonal_first,
+            )
+        raise ValueError("unsupported search pattern '%s'" % self._search_pattern)
 
     def _build_offset_from_surface(self, surface_xyz, probe_direction, lift_distance: float) -> Tuple[float, float, float]:
         if lift_distance <= 0.0:
