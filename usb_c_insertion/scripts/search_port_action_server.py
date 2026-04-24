@@ -52,6 +52,14 @@ class SearchPortActionServer:
         self._search_height = float(rospy.get_param("~search/max_search_height", 0.02))
         self._search_timeout = float(rospy.get_param("~search/search_timeout", 50.0))
         self._search_traverse_timeout = float(rospy.get_param("~search/traverse_timeout", 4.0))
+        self._search_lift_off_distance = float(rospy.get_param("~search/lift_off_distance", 0.0001))
+        self._search_pre_probe_approach_fraction = self._clamp(
+            float(rospy.get_param("~search/pre_probe_approach_fraction", 0.9)),
+            0.0,
+            1.0,
+        )
+        self._search_lift_off_speed = float(rospy.get_param("~search/lift_off_speed", 0.001))
+        self._search_pre_probe_approach_speed = float(rospy.get_param("~search/pre_probe_approach_speed", 0.001))
         self._search_contact_force_target = float(rospy.get_param("~search/contact_force_target", 2.0))
         self._search_probe_speed = float(
             rospy.get_param(
@@ -244,6 +252,24 @@ class SearchPortActionServer:
                 self._abort("search_timeout")
                 return
 
+            self._publish_feedback(
+                "search_lift_off",
+                started_at,
+                step_index,
+                total_steps,
+                reference_point,
+                probe_direction,
+            )
+            move_success, move_error_code = self._move_along_direction(
+                (-probe_direction[0], -probe_direction[1], -probe_direction[2]),
+                self._search_lift_off_distance,
+                self._search_lift_off_speed,
+                self._search_traverse_timeout,
+            )
+            if not move_success:
+                self._abort("search_lift_off_failed", move_error_code)
+                return
+
             current_xyz = (
                 current_xyz[0] + offset.dx * wall_tangent[0],
                 current_xyz[1] + offset.dx * wall_tangent[1],
@@ -258,12 +284,30 @@ class SearchPortActionServer:
                 probe_direction,
             )
             move_success, move_error_code = self._move_to_pose(
-                current_xyz,
+                self._build_lifted_pose(current_xyz, reference_quaternion, probe_direction),
                 reference_quaternion,
                 self._search_traverse_timeout,
             )
             if not move_success:
                 self._abort("search_motion_failed", move_error_code)
+                return
+
+            self._publish_feedback(
+                "search_pre_probe_approach",
+                started_at,
+                step_index,
+                total_steps,
+                reference_point,
+                probe_direction,
+            )
+            move_success, move_error_code = self._move_along_direction(
+                probe_direction,
+                self._search_lift_off_distance * self._search_pre_probe_approach_fraction,
+                self._search_pre_probe_approach_speed,
+                self._search_traverse_timeout,
+            )
+            if not move_success:
+                self._abort("search_pre_probe_approach_failed", move_error_code)
                 return
 
             self._publish_feedback(
@@ -335,6 +379,16 @@ class SearchPortActionServer:
             port_pose.pose.position.z + offset[2],
         )
 
+    def _build_lifted_pose(self, surface_xyz, tool_quaternion, probe_direction) -> Tuple[float, float, float]:
+        if self._search_lift_off_distance <= 0.0:
+            return surface_xyz
+        direction = self._normalize_vector(probe_direction)
+        return (
+            surface_xyz[0] - direction[0] * self._search_lift_off_distance,
+            surface_xyz[1] - direction[1] * self._search_lift_off_distance,
+            surface_xyz[2] - direction[2] * self._search_lift_off_distance,
+        )
+
     def _move_to_pose(self, target_xyz, target_quaternion, timeout: float) -> tuple[bool, str]:
         goal = MoveToPoseGoal()
         goal.target_pose = PoseStamped()
@@ -362,6 +416,74 @@ class SearchPortActionServer:
         if not result.success:
             return False, result.error_code or result.message
         return True, ""
+
+    def _move_along_direction(
+        self,
+        direction_xyz,
+        distance: float,
+        speed: float,
+        timeout: float,
+    ) -> tuple[bool, str]:
+        if distance <= 0.0:
+            return True, ""
+
+        start_pose = self._tf.get_tool_pose_in_base()
+        if start_pose is None:
+            self._robot.stop_motion()
+            return False, "missing_initial_tf"
+
+        direction = self._normalize_vector(direction_xyz)
+        commanded_speed = max(0.0, float(speed))
+        if commanded_speed <= 0.0:
+            self._robot.stop_motion()
+            return False, "invalid_speed"
+
+        start_xyz = (
+            start_pose.pose.position.x,
+            start_pose.pose.position.y,
+            start_pose.pose.position.z,
+        )
+        deadline = rospy.Time.now() + rospy.Duration.from_sec(max(0.1, timeout))
+        rate = rospy.Rate(max(1.0, float(rospy.get_param("~motion/command_rate", 500.0))))
+
+        while not rospy.is_shutdown():
+            if self._server.is_preempt_requested():
+                self._robot.stop_motion()
+                return False, "preempted"
+            if rospy.Time.now() > deadline:
+                self._robot.stop_motion()
+                return False, "move_along_direction_timeout"
+
+            pose = self._tf.get_tool_pose_in_base()
+            if pose is None:
+                self._robot.stop_motion()
+                return False, "missing_tf"
+
+            traveled = self._project_displacement(
+                start_xyz,
+                direction,
+                (
+                    pose.pose.position.x,
+                    pose.pose.position.y,
+                    pose.pose.position.z,
+                ),
+            )
+            if traveled >= distance:
+                self._robot.stop_motion()
+                return True, ""
+
+            self._robot.send_twist(
+                direction[0] * commanded_speed,
+                direction[1] * commanded_speed,
+                direction[2] * commanded_speed,
+                0.0,
+                0.0,
+                0.0,
+            )
+            rate.sleep()
+
+        self._robot.stop_motion()
+        return False, "shutdown"
 
     def _probe_search_position(
         self,
@@ -632,6 +754,19 @@ class SearchPortActionServer:
             + (point_b[1] - point_a[1]) ** 2
             + (point_b[2] - point_a[2]) ** 2
         )
+
+    @staticmethod
+    def _project_displacement(start_xyz, direction_xyz, current_xyz) -> float:
+        delta = (
+            current_xyz[0] - start_xyz[0],
+            current_xyz[1] - start_xyz[1],
+            current_xyz[2] - start_xyz[2],
+        )
+        return sum(delta[index] * direction_xyz[index] for index in range(3))
+
+    @staticmethod
+    def _clamp(value: float, lower: float, upper: float) -> float:
+        return max(lower, min(upper, value))
 
 
 def main() -> None:
