@@ -100,7 +100,6 @@ class SearchPortActionServer:
         self._search_probe_max_travel = float(rospy.get_param("~search/probe_max_travel", 0.004))
         self._search_socket_depth_threshold = float(rospy.get_param("~search/socket_depth_threshold", 0.002))
         self._search_verify_initial_contact = bool(rospy.get_param("~search/verify_initial_contact", True))
-        self._search_verify_candidates = bool(rospy.get_param("~search/verify_candidates", True))
         self._search_verification_required = bool(rospy.get_param("~search/verification_required", True))
         self._search_verify_timeout = float(
             rospy.get_param(
@@ -272,6 +271,11 @@ class SearchPortActionServer:
         if not initial_verification_ok:
             return
         if initial_verified:
+            rospy.loginfo(
+                "[usb_c_insertion] event=initial_contact_verified_port counterforce_y=%.3f counterforce_z=%.3f",
+                float(initial_verify_result.counterforce_y) if initial_verify_result is not None else 0.0,
+                float(initial_verify_result.counterforce_z) if initial_verify_result is not None else 0.0,
+            )
             result = self._make_result(True, True, "initial_contact_verified_port", "", "")
             result.wall_contact_point = wall_contact_point
             result.found_pose = self._current_pose_or_empty()
@@ -284,6 +288,7 @@ class SearchPortActionServer:
             result.completed_steps = 0
             self._server.set_succeeded(result)
             return
+        rospy.loginfo("[usb_c_insertion] event=initial_contact_not_verified continuing_search=true")
 
         try:
             pattern = self._generate_search_pattern()
@@ -395,36 +400,30 @@ class SearchPortActionServer:
                 probe_direction,
             )
             if probe_reason == "socket_depth_reached":
-                verification_ok, verified, verify_result = self._verify_current_insertion(
-                    stage="candidate_verification",
-                    started_at=started_at,
-                    step_index=step_index,
-                    total_steps=total_steps,
-                    reference_point=surface_point,
-                    probe_direction=probe_direction,
-                    enabled=self._search_verify_candidates,
-                    accept_if_disabled=True,
+                self._publish_feedback(
+                    "search_candidate_found",
+                    started_at,
+                    step_index,
+                    total_steps,
+                    surface_point,
+                    probe_direction,
                 )
-                if not verification_ok:
-                    return
-                if verified:
-                    result = self._make_result(True, True, "verified_port_found", "", "")
-                    result.wall_contact_point = wall_contact_point
-                    result.found_pose = self._current_pose_or_empty()
-                    result.inserted_depth = float(inserted_depth)
-                    result.contact_force = float(contact_force)
-                    result.completed_steps = step_index
-                    self._server.set_succeeded(result)
-                    return
-
-                reason = verify_result.failure_reason if verify_result is not None else "verification_skipped"
-                rospy.logwarn(
-                    "[usb_c_insertion] event=search_candidate_rejected step=%d reason=%s inserted_depth=%.4f contact_force=%.3f",
+                rospy.loginfo(
+                    "[usb_c_insertion] event=search_candidate_found step=%d total=%d inserted_depth=%.4f threshold=%.4f contact_force=%.3f lateral_verification=deferred_until_after_insert",
                     int(step_index),
-                    reason,
+                    int(total_steps),
                     float(inserted_depth),
+                    self._search_socket_depth_threshold,
                     float(contact_force),
                 )
+                result = self._make_result(True, True, "potential_port_found", "", "")
+                result.wall_contact_point = wall_contact_point
+                result.found_pose = self._current_pose_or_empty()
+                result.inserted_depth = float(inserted_depth)
+                result.contact_force = float(contact_force)
+                result.completed_steps = step_index
+                self._server.set_succeeded(result)
+                return
 
         result = self._make_result(False, False, "search_pattern_exhausted", "search_pattern_exhausted", "")
         result.wall_contact_point = wall_contact_point
@@ -436,7 +435,7 @@ class SearchPortActionServer:
         self._server.set_aborted(result)
 
     def _verify_insertion_ready(self) -> bool:
-        if not self._search_verify_initial_contact and not self._search_verify_candidates:
+        if not self._search_verify_initial_contact:
             return True
 
         self._verify_insertion_available = self._verify_insertion_client.wait_for_server(

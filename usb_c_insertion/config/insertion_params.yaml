@@ -82,19 +82,20 @@ search:
   contact_force_target: 2.0
   socket_depth_threshold: 0.002
   verify_initial_contact: true
-  verify_candidates: true
   verification_required: true
   verify_timeout: 2.0
   direct_stop_repeat_count: 10
   direct_stop_interval: 0.001
 
 insert:
+  action_name: "insert_cable"
   insertion_depth: 0.01
-  contact_force_target: 17.0
+  contact_force_target: 20.0
   contact_force_tolerance: 1.0
   force_control_gain: 0.006
   force_control_speed_limit: 0.008
   force_control_timeout: 8.0
+  zero_ft_before_insert: false
   release_force_threshold: 2.0
 
 verify:

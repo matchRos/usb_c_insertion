@@ -27,12 +27,16 @@ from tf_interface import TFInterface
 from usb_c_insertion.msg import (
     ApplyYawCorrectionAction,
     ApplyYawCorrectionGoal,
+    InsertCableAction,
+    InsertCableGoal,
     MoveToPoseAction,
     MoveToPoseGoal,
     ProbeSurfaceAction,
     ProbeSurfaceGoal,
     SearchPortAction,
     SearchPortGoal,
+    VerifyInsertionAction,
+    VerifyInsertionGoal,
 )
 from usb_c_insertion.srv import ComputePrePose, ComputePrePoseRequest, RunVision, RunVisionRequest
 
@@ -56,6 +60,18 @@ class PhotoPoseWorkflowExample:
         ).strip()
         self._search_port_action_name = str(
             rospy.get_param("~search_port_action_name", "search_port")
+        ).strip()
+        self._insert_cable_action_name = str(
+            rospy.get_param(
+                "~insert_cable_action_name",
+                rospy.get_param("~insert/action_name", "insert_cable"),
+            )
+        ).strip()
+        self._verify_insertion_action_name = str(
+            rospy.get_param(
+                "~verify_insertion_action_name",
+                rospy.get_param("~verify/action_name", "verify_insertion"),
+            )
         ).strip()
         self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link"))
 
@@ -86,6 +102,14 @@ class PhotoPoseWorkflowExample:
         self._search_port_client = actionlib.SimpleActionClient(
             self._search_port_action_name,
             SearchPortAction,
+        )
+        self._insert_cable_client = actionlib.SimpleActionClient(
+            self._insert_cable_action_name,
+            InsertCableAction,
+        )
+        self._verify_insertion_client = actionlib.SimpleActionClient(
+            self._verify_insertion_action_name,
+            VerifyInsertionAction,
         )
 
     def run(self) -> bool:
@@ -130,7 +154,15 @@ class PhotoPoseWorkflowExample:
         if corrected_pose is None:
             return False
 
-        return self._search_port(port_pose, corrected_pose)
+        search_result = self._search_port(port_pose, corrected_pose)
+        if search_result is None or not bool(search_result.port_found):
+            return False
+
+        insert_result = self._insert_cable(search_result, corrected_pose)
+        if insert_result is None or not bool(insert_result.success):
+            return False
+
+        return self._verify_insertion()
 
     def _move_to_photo_pose(self) -> bool:
         return self._move_to_named_pose(self._goal, "photo_pose")
@@ -564,10 +596,10 @@ class PhotoPoseWorkflowExample:
         )
         return result.corrected_pose
 
-    def _search_port(self, port_pose: PoseStamped, corrected_pose: PoseStamped) -> bool:
+    def _search_port(self, port_pose: PoseStamped, corrected_pose: PoseStamped):
         if not self._search_port_client.wait_for_server(rospy.Duration.from_sec(5.0)):
             rospy.logerr("[usb_c_insertion] event=photo_pose_workflow_failed reason=search_port_action_unavailable")
-            return False
+            return None
 
         goal = SearchPortGoal()
         goal.port_pose = port_pose
@@ -585,7 +617,7 @@ class PhotoPoseWorkflowExample:
         if not finished:
             self._search_port_client.cancel_goal()
             rospy.logerr("[usb_c_insertion] event=photo_pose_workflow_failed reason=search_port_action_timeout")
-            return False
+            return None
 
         result = self._search_port_client.get_result()
         if result is None or not bool(result.success):
@@ -598,7 +630,7 @@ class PhotoPoseWorkflowExample:
                 failure_reason,
                 message,
             )
-            return False
+            return None
 
         rospy.loginfo(
             "[usb_c_insertion] event=search_port_complete port_found=%s inserted_depth=%.4f contact_force=%.3f completed_steps=%d",
@@ -607,7 +639,118 @@ class PhotoPoseWorkflowExample:
             float(result.contact_force),
             int(result.completed_steps),
         )
-        return bool(result.port_found)
+        return result
+
+    def _insert_cable(self, search_result, reference_pose: PoseStamped):
+        if not self._insert_cable_client.wait_for_server(rospy.Duration.from_sec(5.0)):
+            rospy.logerr("[usb_c_insertion] event=photo_pose_workflow_failed reason=insert_cable_action_unavailable")
+            return None
+
+        goal = InsertCableGoal()
+        goal.reference_point = search_result.wall_contact_point
+        goal.reference_pose = reference_pose
+        goal.timeout = float(
+            rospy.get_param(
+                "~photo_pose/insert_timeout",
+                rospy.get_param("~insert/force_control_timeout", 8.0),
+            )
+        )
+        goal.zero_ft_before_insert = bool(rospy.get_param("~insert/zero_ft_before_insert", False))
+
+        rospy.loginfo("[usb_c_insertion] event=insert_cable_goal_sent")
+        self._insert_cable_client.send_goal(goal, feedback_cb=self._insert_feedback_callback)
+        finished = self._insert_cable_client.wait_for_result(
+            rospy.Duration.from_sec(max(1.0, goal.timeout + 5.0))
+        )
+        if not finished:
+            self._insert_cable_client.cancel_goal()
+            rospy.logerr("[usb_c_insertion] event=photo_pose_workflow_failed reason=insert_cable_action_timeout")
+            return None
+
+        result = self._insert_cable_client.get_result()
+        if result is None or not bool(result.success):
+            message = result.message if result is not None else "no_result"
+            error_code = result.error_code if result is not None else "insert_cable_action_no_result"
+            failure_reason = result.failure_reason if result is not None else ""
+            rospy.logerr(
+                "[usb_c_insertion] event=photo_pose_workflow_failed reason=insert_cable_action_failed error_code=%s failure_reason=%s message=%s",
+                error_code,
+                failure_reason,
+                message,
+            )
+            return result
+
+        rospy.loginfo(
+            "[usb_c_insertion] event=insert_cable_complete inserted_depth=%.4f contact_force=%.3f message=%s",
+            float(result.inserted_depth),
+            float(result.contact_force),
+            result.message,
+        )
+        return result
+
+    def _verify_insertion(self) -> bool:
+        if not self._verify_insertion_client.wait_for_server(rospy.Duration.from_sec(5.0)):
+            rospy.logerr("[usb_c_insertion] event=photo_pose_workflow_failed reason=verify_insertion_action_unavailable")
+            return False
+
+        goal = VerifyInsertionGoal()
+        goal.timeout = float(
+            rospy.get_param(
+                "~photo_pose/verify_timeout",
+                rospy.get_param("~verify/action_timeout", 2.0),
+            )
+        )
+        goal.zero_ft_before_verify = bool(rospy.get_param("~verify/zero_ft_before_verify", False))
+
+        rospy.loginfo("[usb_c_insertion] event=verify_insertion_goal_sent")
+        self._verify_insertion_client.send_goal(goal, feedback_cb=self._verify_feedback_callback)
+        finished = self._verify_insertion_client.wait_for_result(
+            rospy.Duration.from_sec(max(1.0, goal.timeout * 2.0 + 3.0))
+        )
+        if not finished:
+            self._verify_insertion_client.cancel_goal()
+            rospy.logerr("[usb_c_insertion] event=photo_pose_workflow_failed reason=verify_insertion_action_timeout")
+            return False
+
+        result = self._verify_insertion_client.get_result()
+        if result is None or not bool(result.success) or not bool(result.verified):
+            message = result.message if result is not None else "no_result"
+            error_code = result.error_code if result is not None else "verify_insertion_action_no_result"
+            failure_reason = result.failure_reason if result is not None else ""
+            rospy.logerr(
+                "[usb_c_insertion] event=photo_pose_workflow_failed reason=verify_insertion_failed error_code=%s failure_reason=%s message=%s",
+                error_code,
+                failure_reason,
+                message,
+            )
+            return False
+
+        rospy.loginfo(
+            "[usb_c_insertion] event=verify_insertion_complete counterforce_y=%.3f counterforce_z=%.3f",
+            float(result.counterforce_y),
+            float(result.counterforce_z),
+        )
+        return True
+
+    def _insert_feedback_callback(self, feedback) -> None:
+        rospy.loginfo_throttle(
+            1.0,
+            "[usb_c_insertion] event=insert_cable_feedback stage=%s inserted_depth=%.4f contact_force=%.3f elapsed=%.2f",
+            feedback.stage,
+            float(feedback.inserted_depth),
+            float(feedback.contact_force),
+            float(feedback.elapsed),
+        )
+
+    def _verify_feedback_callback(self, feedback) -> None:
+        rospy.loginfo_throttle(
+            1.0,
+            "[usb_c_insertion] event=verify_insertion_feedback stage=%s counterforce_y=%.3f counterforce_z=%.3f elapsed=%.2f",
+            feedback.stage,
+            float(feedback.counterforce_y),
+            float(feedback.counterforce_z),
+            float(feedback.elapsed),
+        )
 
     def _search_feedback_callback(self, feedback) -> None:
         rospy.loginfo_throttle(

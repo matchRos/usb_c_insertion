@@ -1,0 +1,17 @@
+geometry_msgs/PointStamped reference_point
+geometry_msgs/PoseStamped reference_pose
+float32 timeout
+bool zero_ft_before_insert
+---
+bool success
+string message
+string error_code
+string failure_reason
+geometry_msgs/PoseStamped final_pose
+float32 inserted_depth
+float32 contact_force
+---
+string stage
+float32 elapsed
+float32 inserted_depth
+float32 contact_force

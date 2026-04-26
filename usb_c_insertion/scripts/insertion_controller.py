@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import math
 import os
 import sys
-from typing import Tuple
+from typing import Optional, Tuple
 
 import rospy
 
@@ -58,12 +58,18 @@ class InsertionController:
         self,
         reference_point_xyz: Tuple[float, float, float],
         insertion_direction_xyz: Tuple[float, float, float],
+        force_control_timeout: Optional[float] = None,
     ) -> InsertionResult:
         """
         Drive along the insertion axis while regulating tool-frame contact force.
         """
         direction = self._normalize_vector(insertion_direction_xyz)
-        deadline = rospy.Time.now() + rospy.Duration.from_sec(self._force_control_timeout)
+        timeout = (
+            self._force_control_timeout
+            if force_control_timeout is None or force_control_timeout <= 0.0
+            else float(force_control_timeout)
+        )
+        deadline = rospy.Time.now() + rospy.Duration.from_sec(timeout)
         rate = rospy.Rate(max(1.0, self._command_rate))
 
         while not rospy.is_shutdown():
