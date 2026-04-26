@@ -55,6 +55,8 @@ class SearchPortActionServer:
         self._micro_pattern_max_velocity = float(rospy.get_param("~search/micro_pattern_max_velocity", 0.0))
         self._micro_pattern_max_acceleration = float(rospy.get_param("~search/micro_pattern_max_acceleration", 0.0))
         self._micro_pattern_max_jerk = float(rospy.get_param("~search/micro_pattern_max_jerk", 0.0))
+        self._micro_pattern_arc_enabled = bool(rospy.get_param("~search/micro_pattern_arc_enabled", True))
+        self._micro_pattern_arc_height = max(0.0, float(rospy.get_param("~search/micro_pattern_arc_height", 0.004)))
         self._search_step_y = float(rospy.get_param("~search/step_y", 0.001))
         self._search_step_z = float(rospy.get_param("~search/step_z", 0.001))
         self._search_width = float(rospy.get_param("~search/max_search_width", 0.02))
@@ -199,6 +201,22 @@ class SearchPortActionServer:
             rospy.sleep(0.5)
 
         self._publish_feedback("move_to_port_precontact", started_at, 0, 0, None, probe_direction)
+        rospy.loginfo(
+            "[usb_c_insertion] event=micro_pattern_preview_reference "
+            "enabled=%s precontact_offset_tool_z=%.4f port_xyz=(%.4f,%.4f,%.4f) "
+            "precontact_xyz=(%.4f,%.4f,%.4f) probe_direction=(%.4f,%.4f,%.4f)",
+            self._micro_pattern_preview_enabled,
+            self._precontact_offset_tool_z,
+            goal.port_pose.pose.position.x,
+            goal.port_pose.pose.position.y,
+            goal.port_pose.pose.position.z,
+            precontact_xyz[0],
+            precontact_xyz[1],
+            precontact_xyz[2],
+            probe_direction[0],
+            probe_direction[1],
+            probe_direction[2],
+        )
         move_success, move_error_code = self._move_to_pose(
             precontact_xyz,
             reference_quaternion,
@@ -458,10 +476,13 @@ class SearchPortActionServer:
 
         total_steps = len(pattern)
         rospy.loginfo(
-            "[usb_c_insertion] event=micro_pattern_preview_start pattern=%s steps=%d dwell_time=%.3f",
+            "[usb_c_insertion] event=micro_pattern_preview_start pattern=%s steps=%d "
+            "dwell_time=%.3f arc_enabled=%s arc_height=%.4f",
             self._search_pattern,
             total_steps,
             self._micro_pattern_dwell_time,
+            self._micro_pattern_arc_enabled,
+            self._micro_pattern_arc_height,
         )
 
         for step_index, offset in enumerate(pattern, start=1):
@@ -484,17 +505,13 @@ class SearchPortActionServer:
                 offset.dx * wall_tangent[1],
                 offset.dy,
             )
-            self._publish_feedback(
-                "micro_pattern_move",
+            if not self._move_micro_pattern_step(
                 started_at,
                 step_index,
                 total_steps,
-                None,
+                displacement,
                 probe_direction,
-            )
-            move_success, move_error_code = self._move_micro(displacement, self._search_traverse_timeout)
-            if not move_success:
-                self._abort("micro_pattern_move_failed", move_error_code)
+            ):
                 return
 
             self._publish_feedback(
@@ -512,6 +529,56 @@ class SearchPortActionServer:
         result.found_pose = self._current_pose_or_empty()
         result.completed_steps = total_steps
         self._server.set_succeeded(result)
+
+    def _move_micro_pattern_step(
+        self,
+        started_at: rospy.Time,
+        step_index: int,
+        total_steps: int,
+        displacement,
+        probe_direction,
+    ) -> bool:
+        if not self._micro_pattern_arc_enabled or self._micro_pattern_arc_height <= 0.0:
+            self._publish_feedback(
+                "micro_pattern_move",
+                started_at,
+                step_index,
+                total_steps,
+                None,
+                probe_direction,
+            )
+            move_success, move_error_code = self._move_micro(displacement, self._search_traverse_timeout)
+            if not move_success:
+                self._abort("micro_pattern_move_failed", move_error_code)
+                return False
+            return True
+
+        direction = self._normalize_vector(probe_direction)
+        lift = (
+            -direction[0] * self._micro_pattern_arc_height,
+            -direction[1] * self._micro_pattern_arc_height,
+            -direction[2] * self._micro_pattern_arc_height,
+        )
+        lower = (-lift[0], -lift[1], -lift[2])
+
+        for stage, stage_displacement in (
+            ("micro_pattern_arc_lift", lift),
+            ("micro_pattern_arc_traverse", displacement),
+            ("micro_pattern_arc_lower", lower),
+        ):
+            self._publish_feedback(
+                stage,
+                started_at,
+                step_index,
+                total_steps,
+                None,
+                probe_direction,
+            )
+            move_success, move_error_code = self._move_micro(stage_displacement, self._search_traverse_timeout)
+            if not move_success:
+                self._abort("%s_failed" % stage, move_error_code)
+                return False
+        return True
 
     def _validate_pose_frame(self, pose: PoseStamped, error_code: str) -> bool:
         frame_id = pose.header.frame_id.strip() or self._base_frame
