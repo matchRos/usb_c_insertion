@@ -92,6 +92,8 @@ class InsertCableActionServer:
 
         try:
             insertion_direction = self._tool_z_direction(goal.reference_pose)
+            wiggle_y_direction = self._tool_axis_direction(goal.reference_pose, (0.0, 1.0, 0.0))
+            wiggle_x_direction = self._tool_axis_direction(goal.reference_pose, (1.0, 0.0, 0.0))
         except ValueError as exc:
             self._server.set_aborted(
                 self._make_result(False, str(exc), "insert_geometry_failed", "insert_geometry_failed", 0.0, 0.0)
@@ -109,6 +111,8 @@ class InsertCableActionServer:
             reference_point,
             insertion_direction,
             force_control_timeout=timeout,
+            wiggle_y_direction_xyz=wiggle_y_direction,
+            wiggle_x_direction_xyz=wiggle_x_direction,
         )
         action_result = self._make_result(
             result.success,
@@ -184,13 +188,17 @@ class InsertCableActionServer:
 
     @staticmethod
     def _tool_z_direction(reference_pose):
+        return InsertCableActionServer._tool_axis_direction(reference_pose, (0.0, 0.0, 1.0))
+
+    @staticmethod
+    def _tool_axis_direction(reference_pose, axis_xyz):
         quaternion = (
             reference_pose.pose.orientation.x,
             reference_pose.pose.orientation.y,
             reference_pose.pose.orientation.z,
             reference_pose.pose.orientation.w,
         )
-        return rotate_vector_by_quaternion(0.0, 0.0, 1.0, *quaternion)
+        return rotate_vector_by_quaternion(axis_xyz[0], axis_xyz[1], axis_xyz[2], *quaternion)
 
     @staticmethod
     def _goal_or_default(value: float, default: float) -> float:

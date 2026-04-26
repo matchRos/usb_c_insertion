@@ -352,7 +352,7 @@ class PhotoPoseWorkflowExample:
             port_pose.pose.position.z - camera_z_axis[2] * self._refine_camera_distance,
         )
         plane_normal_yaw = math.atan2(port_x_axis[1], port_x_axis[0])
-        desired_tool_z_yaw = normalize_angle(plane_normal_yaw + math.pi)
+        desired_tool_z_yaw = normalize_angle(-plane_normal_yaw + math.pi)
         rospy.loginfo(
             "[usb_c_insertion] event=refined_camera_plane_orientation_z frame=%s plane_normal_yaw_deg=%.2f desired_tool_z_yaw_deg=%.2f plane_tangent_yaw_deg=%.2f port_x_axis=(%.4f,%.4f,%.4f) port_y_axis=(%.4f,%.4f,%.4f) port_q=(%.4f,%.4f,%.4f,%.4f)",
             self._base_frame,

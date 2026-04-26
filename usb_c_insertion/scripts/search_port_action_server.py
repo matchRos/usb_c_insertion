@@ -59,8 +59,8 @@ class SearchPortActionServer:
         ).strip()
 
         self._search_pattern = str(rospy.get_param("~search/pattern", "spiral")).strip().lower()
+        self._search_step_x = float(rospy.get_param("~search/step_x", 0.001))
         self._search_step_y = float(rospy.get_param("~search/step_y", 0.001))
-        self._search_step_z = float(rospy.get_param("~search/step_z", 0.001))
         self._search_width = float(rospy.get_param("~search/max_search_width", 0.02))
         self._search_height = float(rospy.get_param("~search/max_search_height", 0.02))
         self._search_timeout = float(rospy.get_param("~search/search_timeout", 50.0))
@@ -538,8 +538,8 @@ class SearchPortActionServer:
     def _generate_search_pattern(self):
         if self._search_pattern == "spiral":
             return generate_preferred_square_spiral_pattern(
-                step_x=self._search_step_y,
-                step_y=self._search_step_z,
+                step_x=self._search_step_x,
+                step_y=self._search_step_y,
                 width=self._search_width,
                 height=self._search_height,
                 preferred_x_sign=self._search_preferred_tool_x_sign,
@@ -547,8 +547,8 @@ class SearchPortActionServer:
             )
         if self._search_pattern == "raster":
             return generate_centered_raster_pattern(
-                step_x=self._search_step_y,
-                step_y=self._search_step_z,
+                step_x=self._search_step_x,
+                step_y=self._search_step_y,
                 width=self._search_width,
                 height=self._search_height,
                 preferred_x_sign=self._search_preferred_tool_x_sign,
