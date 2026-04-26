@@ -55,6 +55,9 @@ search:
   traverse_slowdown_distance: 0.003
   traverse_min_speed: 0.001
   lift_off_distance: 0.0002
+  fast_pre_probe_enabled: true
+  fast_pre_probe_clearance: 0.003
+  fast_pre_probe_speed: 0.025
   diagonal_pre_probe_approach: true
   preferred_tool_x_sign: -1.0
   preferred_z_sign: 1.0
@@ -117,8 +120,8 @@ state_machine:
   enabled: true
   auto_zero_ft: true
   log_debug: true
-  target_offset_tool_x: -0.017
-  target_offset_tool_y: -0.01
+  target_offset_tool_x: -0.016
+  target_offset_tool_y: -0.009
   prepose_offset: -0.01
   precontact_offset_tool_x: -0.000
   precontact_offset_tool_y: 0.000
@@ -132,6 +135,8 @@ workflow:
   refine_vision_required: true
   refine_camera_frame: "zedm_left_camera_optical_frame"
   refine_camera_distance: 0.12
+  refine_yaw_delta_sign: 1.0
+  refine_yaw_max_delta_deg: 45.0
   photo_pose_max_linear_speed: 0.12
   photo_pose_max_angular_speed: 0.35
   prepose_max_linear_speed: 0.10

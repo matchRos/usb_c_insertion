@@ -16,8 +16,11 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from prepose_planner import (
+    euler_from_quaternion,
     normalize_quaternion,
     normalize_vector,
+    normalize_angle,
+    quaternion_from_euler,
     rotate_vector_by_quaternion,
 )
 from tf_interface import TFInterface
@@ -66,6 +69,8 @@ class PhotoPoseWorkflowExample:
         ).strip()
         self._tool_frame = str(rospy.get_param("~frames/tool_frame", "tool0_controller")).strip()
         self._refine_camera_distance = float(rospy.get_param("~workflow/refine_camera_distance", 0.12))
+        self._refine_yaw_delta_sign = float(rospy.get_param("~workflow/refine_yaw_delta_sign", 1.0))
+        self._refine_yaw_max_delta_deg = float(rospy.get_param("~workflow/refine_yaw_max_delta_deg", 45.0))
 
         self._goal = self._load_goal_pose()
         self._tf = TFInterface()
@@ -251,7 +256,11 @@ class PhotoPoseWorkflowExample:
         )
 
         try:
-            target_camera_xyz = self._compute_desired_camera_position(port_pose)
+            target_camera_xyz, plane_normal_yaw = self._compute_desired_camera_position_and_yaw(port_pose)
+            tool_quaternion = self._keep_current_roll_pitch_with_target_tool_z_yaw(
+                tool_quaternion,
+                plane_normal_yaw,
+            )
             tool_xyz = self._camera_target_to_tool_position(
                 target_camera_xyz,
                 tool_quaternion,
@@ -276,7 +285,7 @@ class PhotoPoseWorkflowExample:
         target_pose.pose.orientation.w = tool_quaternion[3]
 
         rospy.loginfo(
-            "[usb_c_insertion] event=refined_camera_target_computed camera_frame=%s distance=%.4f tool_x=%.4f tool_y=%.4f tool_z=%.4f orientation_source=current_tcp",
+            "[usb_c_insertion] event=refined_camera_target_computed camera_frame=%s distance=%.4f tool_x=%.4f tool_y=%.4f tool_z=%.4f orientation_source=current_roll_pitch_target_yaw",
             self._refine_camera_frame,
             self._refine_camera_distance,
             tool_xyz[0],
@@ -285,7 +294,10 @@ class PhotoPoseWorkflowExample:
         )
         return target_pose
 
-    def _compute_desired_camera_position(self, port_pose: PoseStamped) -> Tuple[float, float, float]:
+    def _compute_desired_camera_position_and_yaw(
+        self,
+        port_pose: PoseStamped,
+    ) -> tuple[Tuple[float, float, float], float]:
         port_quaternion = (
             port_pose.pose.orientation.x,
             port_pose.pose.orientation.y,
@@ -293,12 +305,93 @@ class PhotoPoseWorkflowExample:
             port_pose.pose.orientation.w,
         )
         port_x_axis = rotate_vector_by_quaternion(1.0, 0.0, 0.0, *port_quaternion)
+        port_y_axis = rotate_vector_by_quaternion(0.0, 1.0, 0.0, *port_quaternion)
         camera_z_axis = normalize_vector((-port_x_axis[0], -port_x_axis[1], -port_x_axis[2]))
-        return (
+        camera_xyz = (
             port_pose.pose.position.x - camera_z_axis[0] * self._refine_camera_distance,
             port_pose.pose.position.y - camera_z_axis[1] * self._refine_camera_distance,
             port_pose.pose.position.z - camera_z_axis[2] * self._refine_camera_distance,
         )
+        plane_normal_yaw = math.atan2(port_x_axis[1], port_x_axis[0])
+        desired_tool_z_yaw = normalize_angle(plane_normal_yaw + math.pi)
+        rospy.loginfo(
+            "[usb_c_insertion] event=refined_camera_plane_orientation_z frame=%s plane_normal_yaw_deg=%.2f desired_tool_z_yaw_deg=%.2f plane_tangent_yaw_deg=%.2f port_x_axis=(%.4f,%.4f,%.4f) port_y_axis=(%.4f,%.4f,%.4f) port_q=(%.4f,%.4f,%.4f,%.4f)",
+            self._base_frame,
+            math.degrees(plane_normal_yaw),
+            math.degrees(desired_tool_z_yaw),
+            math.degrees(self._yaw_of_projected_vector(port_y_axis)),
+            port_x_axis[0],
+            port_x_axis[1],
+            port_x_axis[2],
+            port_y_axis[0],
+            port_y_axis[1],
+            port_y_axis[2],
+            port_quaternion[0],
+            port_quaternion[1],
+            port_quaternion[2],
+            port_quaternion[3],
+        )
+        return camera_xyz, plane_normal_yaw
+
+    def _keep_current_roll_pitch_with_target_tool_z_yaw(
+        self,
+        current_tool_quaternion,
+        plane_normal_yaw: float,
+    ) -> Tuple[float, float, float, float]:
+        current_roll, current_pitch, current_yaw = euler_from_quaternion(current_tool_quaternion)
+        tool_x_axis = rotate_vector_by_quaternion(1.0, 0.0, 0.0, *current_tool_quaternion)
+        tool_y_axis = rotate_vector_by_quaternion(0.0, 1.0, 0.0, *current_tool_quaternion)
+        tool_z_axis = rotate_vector_by_quaternion(0.0, 0.0, 1.0, *current_tool_quaternion)
+        current_tool_z_yaw = self._yaw_of_projected_vector(tool_z_axis)
+        desired_tool_z_yaw = normalize_angle(plane_normal_yaw + math.pi)
+        rospy.loginfo(
+            "[usb_c_insertion] event=refined_camera_tcp_orientation_z frame=%s tcp_euler_yaw_deg=%.2f tool_x_yaw_deg=%.2f tool_y_yaw_deg=%.2f tool_z_yaw_deg=%.2f tool_x_axis=(%.4f,%.4f,%.4f) tool_y_axis=(%.4f,%.4f,%.4f) tool_z_axis=(%.4f,%.4f,%.4f) tool_q=(%.4f,%.4f,%.4f,%.4f)",
+            self._base_frame,
+            math.degrees(current_yaw),
+            math.degrees(self._yaw_of_projected_vector(tool_x_axis)),
+            math.degrees(self._yaw_of_projected_vector(tool_y_axis)),
+            math.degrees(current_tool_z_yaw),
+            tool_x_axis[0],
+            tool_x_axis[1],
+            tool_x_axis[2],
+            tool_y_axis[0],
+            tool_y_axis[1],
+            tool_y_axis[2],
+            tool_z_axis[0],
+            tool_z_axis[1],
+            tool_z_axis[2],
+            current_tool_quaternion[0],
+            current_tool_quaternion[1],
+            current_tool_quaternion[2],
+            current_tool_quaternion[3],
+        )
+        raw_yaw_delta = normalize_angle(desired_tool_z_yaw - current_tool_z_yaw)
+        applied_yaw_delta = normalize_angle(self._refine_yaw_delta_sign * raw_yaw_delta)
+        applied_yaw_delta_deg = math.degrees(applied_yaw_delta)
+        corrected_yaw = normalize_angle(current_yaw + applied_yaw_delta)
+        rospy.loginfo(
+            "[usb_c_insertion] event=refined_camera_yaw_delta current_tcp_yaw_deg=%.2f current_tool_z_yaw_deg=%.2f plane_normal_yaw_deg=%.2f desired_tool_z_yaw_deg=%.2f raw_delta_deg=%.2f applied_delta_deg=%.2f sign=%.1f max_delta_deg=%.2f",
+            math.degrees(current_yaw),
+            math.degrees(current_tool_z_yaw),
+            math.degrees(plane_normal_yaw),
+            math.degrees(desired_tool_z_yaw),
+            math.degrees(raw_yaw_delta),
+            applied_yaw_delta_deg,
+            self._refine_yaw_delta_sign,
+            self._refine_yaw_max_delta_deg,
+        )
+        if abs(applied_yaw_delta_deg) > self._refine_yaw_max_delta_deg:
+            raise ValueError(
+                "refined_camera_yaw_delta_exceeds_limit: applied_delta_deg=%.2f max_delta_deg=%.2f"
+                % (applied_yaw_delta_deg, self._refine_yaw_max_delta_deg)
+        )
+        return quaternion_from_euler(current_roll, current_pitch, corrected_yaw)
+
+    @staticmethod
+    def _yaw_of_projected_vector(vector_xyz) -> float:
+        if math.hypot(vector_xyz[0], vector_xyz[1]) <= 1e-9:
+            return float("nan")
+        return math.atan2(vector_xyz[1], vector_xyz[0])
 
     def _camera_target_to_tool_position(
         self,

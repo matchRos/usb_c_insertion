@@ -65,6 +65,13 @@ class SearchPortActionServer:
         )
         self._search_traverse_min_speed = float(rospy.get_param("~search/traverse_min_speed", 0.001))
         self._search_lift_off_distance = float(rospy.get_param("~search/lift_off_distance", 0.0001))
+        self._search_fast_pre_probe_enabled = bool(rospy.get_param("~search/fast_pre_probe_enabled", True))
+        self._search_fast_pre_probe_clearance = float(
+            rospy.get_param("~search/fast_pre_probe_clearance", 0.003)
+        )
+        self._search_fast_pre_probe_speed = float(
+            rospy.get_param("~search/fast_pre_probe_speed", self._search_traverse_speed)
+        )
         self._search_pre_probe_approach_fraction = self._clamp(
             float(rospy.get_param("~search/pre_probe_approach_fraction", 0.9)),
             0.0,
@@ -276,52 +283,78 @@ class SearchPortActionServer:
                 self._abort("search_timeout")
                 return
 
-            self._publish_feedback(
-                "search_lift_off",
-                started_at,
-                step_index,
-                total_steps,
-                reference_point,
-                probe_direction,
-            )
-            move_success, move_error_code = self._move_along_direction(
-                (-probe_direction[0], -probe_direction[1], -probe_direction[2]),
-                self._search_lift_off_distance,
-                self._search_lift_off_speed,
-                self._search_traverse_timeout,
-            )
-            if not move_success:
-                self._abort("search_lift_off_failed", move_error_code)
-                return
-
             current_xyz = (
                 current_xyz[0] + offset.dx * wall_tangent[0],
                 current_xyz[1] + offset.dx * wall_tangent[1],
                 current_xyz[2] + offset.dy,
             )
-            target_lift_distance = self._search_lift_off_distance
-            if self._search_diagonal_pre_probe_approach:
-                target_lift_distance = self._search_lift_off_distance * (1.0 - self._search_pre_probe_approach_fraction)
 
-            self._publish_feedback(
-                "search_move",
-                started_at,
-                step_index,
-                total_steps,
-                reference_point,
-                probe_direction,
-            )
-            move_success, move_error_code = self._move_to_xyz(
-                self._build_offset_from_surface(current_xyz, probe_direction, target_lift_distance),
-                self._search_traverse_speed,
-                self._search_traverse_tolerance,
-                self._search_traverse_timeout,
-            )
-            if not move_success:
-                self._abort("search_motion_failed", move_error_code)
-                return
+            if self._search_fast_pre_probe_enabled:
+                target_lift_distance = max(
+                    self._search_lift_off_distance,
+                    self._search_fast_pre_probe_clearance,
+                )
+                self._publish_feedback(
+                    "search_fast_pre_probe",
+                    started_at,
+                    step_index,
+                    total_steps,
+                    reference_point,
+                    probe_direction,
+                )
+                move_success, move_error_code = self._move_to_xyz(
+                    self._build_offset_from_surface(current_xyz, probe_direction, target_lift_distance),
+                    self._search_fast_pre_probe_speed,
+                    self._search_traverse_tolerance,
+                    self._search_traverse_timeout,
+                )
+                if not move_success:
+                    self._abort("search_fast_pre_probe_failed", move_error_code)
+                    return
+            else:
+                self._publish_feedback(
+                    "search_lift_off",
+                    started_at,
+                    step_index,
+                    total_steps,
+                    reference_point,
+                    probe_direction,
+                )
+                move_success, move_error_code = self._move_along_direction(
+                    (-probe_direction[0], -probe_direction[1], -probe_direction[2]),
+                    self._search_lift_off_distance,
+                    self._search_lift_off_speed,
+                    self._search_traverse_timeout,
+                )
+                if not move_success:
+                    self._abort("search_lift_off_failed", move_error_code)
+                    return
 
-            if not self._search_diagonal_pre_probe_approach:
+                target_lift_distance = self._search_lift_off_distance
+                if self._search_diagonal_pre_probe_approach:
+                    target_lift_distance = self._search_lift_off_distance * (
+                        1.0 - self._search_pre_probe_approach_fraction
+                    )
+
+                self._publish_feedback(
+                    "search_move",
+                    started_at,
+                    step_index,
+                    total_steps,
+                    reference_point,
+                    probe_direction,
+                )
+                move_success, move_error_code = self._move_to_xyz(
+                    self._build_offset_from_surface(current_xyz, probe_direction, target_lift_distance),
+                    self._search_traverse_speed,
+                    self._search_traverse_tolerance,
+                    self._search_traverse_timeout,
+                )
+                if not move_success:
+                    self._abort("search_motion_failed", move_error_code)
+                    return
+
+            if not self._search_fast_pre_probe_enabled and not self._search_diagonal_pre_probe_approach:
                 self._publish_feedback(
                     "search_pre_probe_approach",
                     started_at,
