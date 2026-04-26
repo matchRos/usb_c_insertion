@@ -2,6 +2,8 @@ geometry_msgs/Vector3 displacement
 float32 max_velocity
 float32 max_acceleration
 float32 max_jerk
+geometry_msgs/Vector3 arc_direction
+float32 arc_height
 float32 timeout
 bool monitor_tf
 ---

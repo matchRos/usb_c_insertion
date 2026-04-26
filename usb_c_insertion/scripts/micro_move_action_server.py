@@ -78,6 +78,16 @@ class MicroMoveActionServer:
             float(goal.displacement.z),
         )
         distance = self._norm(displacement)
+        arc_height = max(0.0, float(goal.arc_height))
+        arc_direction = self._prepare_arc_direction(
+            (
+                float(goal.arc_direction.x),
+                float(goal.arc_direction.y),
+                float(goal.arc_direction.z),
+            ),
+            displacement,
+            distance,
+        )
         if distance <= 1e-9:
             self._server.set_succeeded(self._make_result(True, "zero_distance", "", 0.0, 0.0, 0.0))
             return
@@ -93,13 +103,26 @@ class MicroMoveActionServer:
                 )
             )
             return
+        if arc_height > self._max_distance:
+            self._server.set_aborted(
+                self._make_result(
+                    False,
+                    "arc_height_exceeds_limit",
+                    "arc_height_exceeds_limit",
+                    distance,
+                    0.0,
+                    0.0,
+                )
+            )
+            return
 
         direction = tuple(component / distance for component in displacement)
         max_velocity = self._goal_or_default(goal.max_velocity, self._default_max_velocity)
         max_acceleration = self._goal_or_default(goal.max_acceleration, self._default_max_acceleration)
         max_jerk = self._goal_or_default(goal.max_jerk, self._default_max_jerk)
         monitor_tf = self._default_monitor_tf if not bool(goal.monitor_tf) else bool(goal.monitor_tf)
-        duration = self._compute_duration(distance, max_velocity, max_acceleration, max_jerk)
+        effective_distance = distance + (2.0 * arc_height if arc_direction is not None else 0.0)
+        duration = self._compute_duration(effective_distance, max_velocity, max_acceleration, max_jerk)
         timeout = self._goal_or_default(goal.timeout, duration + 0.25)
 
         if duration > self._max_duration:
@@ -119,8 +142,11 @@ class MicroMoveActionServer:
         start_xyz = self._pose_xyz(start_pose) if start_pose is not None else None
 
         rospy.loginfo(
-            "[usb_c_insertion] event=micro_move_start distance=%.5f duration=%.4f vmax=%.3f amax=%.3f jmax=%.3f dx=%.5f dy=%.5f dz=%.5f",
+            "[usb_c_insertion] event=micro_move_start distance=%.5f effective_distance=%.5f "
+            "duration=%.4f vmax=%.3f amax=%.3f jmax=%.3f dx=%.5f dy=%.5f dz=%.5f "
+            "arc_height=%.5f arc_direction=(%.5f,%.5f,%.5f)",
             distance,
+            effective_distance,
             duration,
             max_velocity,
             max_acceleration,
@@ -128,6 +154,10 @@ class MicroMoveActionServer:
             displacement[0],
             displacement[1],
             displacement[2],
+            arc_height if arc_direction is not None else 0.0,
+            arc_direction[0] if arc_direction is not None else 0.0,
+            arc_direction[1] if arc_direction is not None else 0.0,
+            arc_direction[2] if arc_direction is not None else 0.0,
         )
 
         started_at = rospy.Time.now()
@@ -165,11 +195,14 @@ class MicroMoveActionServer:
                     break
 
                 u = self._clamp(elapsed / duration, 0.0, 1.0)
-                commanded_speed = distance * self._smoothstep7_derivative(u) / duration
+                phase = self._smoothstep7(u)
+                phase_rate = self._smoothstep7_derivative(u) / duration
+                velocity = self._path_velocity(displacement, arc_direction, arc_height, phase, phase_rate)
+                commanded_speed = self._norm(velocity)
                 twist = Twist()
-                twist.linear.x = direction[0] * commanded_speed
-                twist.linear.y = direction[1] * commanded_speed
-                twist.linear.z = direction[2] * commanded_speed
+                twist.linear.x = velocity[0]
+                twist.linear.y = velocity[1]
+                twist.linear.z = velocity[2]
                 self._publisher.publish(self._to_controller_frame(twist))
 
                 if start_xyz is not None:
@@ -267,8 +300,42 @@ class MicroMoveActionServer:
         self._set_micro_motion_active(False)
 
     @staticmethod
+    def _smoothstep7(u: float) -> float:
+        return 35.0 * u ** 4 - 84.0 * u ** 5 + 70.0 * u ** 6 - 20.0 * u ** 7
+
+    @staticmethod
     def _smoothstep7_derivative(u: float) -> float:
         return 140.0 * u ** 3 - 420.0 * u ** 4 + 420.0 * u ** 5 - 140.0 * u ** 6
+
+    @staticmethod
+    def _arc_bump_derivative(phase: float) -> float:
+        return 32.0 * phase * (1.0 - phase) * (1.0 - 2.0 * phase)
+
+    def _path_velocity(self, displacement, arc_direction, arc_height: float, phase: float, phase_rate: float):
+        if arc_direction is None or arc_height <= 0.0:
+            return tuple(component * phase_rate for component in displacement)
+        bump_derivative = self._arc_bump_derivative(phase)
+        return tuple(
+            (displacement[index] + arc_direction[index] * arc_height * bump_derivative) * phase_rate
+            for index in range(3)
+        )
+
+    def _prepare_arc_direction(self, arc_direction, displacement, distance: float) -> Optional[Tuple[float, float, float]]:
+        arc_norm = self._norm(arc_direction)
+        if arc_norm <= 1e-9 or distance <= 1e-9:
+            return None
+
+        move_direction = tuple(component / distance for component in displacement)
+        normalized_arc = tuple(component / arc_norm for component in arc_direction)
+        parallel = sum(normalized_arc[index] * move_direction[index] for index in range(3))
+        orthogonal = tuple(
+            normalized_arc[index] - parallel * move_direction[index]
+            for index in range(3)
+        )
+        orthogonal_norm = self._norm(orthogonal)
+        if orthogonal_norm <= 1e-6:
+            return normalized_arc
+        return tuple(component / orthogonal_norm for component in orthogonal)
 
     @staticmethod
     def _goal_or_default(value: float, default: float) -> float:

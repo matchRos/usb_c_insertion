@@ -538,46 +538,32 @@ class SearchPortActionServer:
         displacement,
         probe_direction,
     ) -> bool:
-        if not self._micro_pattern_arc_enabled or self._micro_pattern_arc_height <= 0.0:
-            self._publish_feedback(
-                "micro_pattern_move",
-                started_at,
-                step_index,
-                total_steps,
-                None,
-                probe_direction,
-            )
-            move_success, move_error_code = self._move_micro(displacement, self._search_traverse_timeout)
-            if not move_success:
-                self._abort("micro_pattern_move_failed", move_error_code)
-                return False
-            return True
+        use_arc = self._micro_pattern_arc_enabled and self._micro_pattern_arc_height > 0.0
+        stage = "micro_pattern_arc_move" if use_arc else "micro_pattern_move"
+        arc_direction = None
+        arc_height = 0.0
+        if use_arc:
+            direction = self._normalize_vector(probe_direction)
+            arc_direction = (-direction[0], -direction[1], -direction[2])
+            arc_height = self._micro_pattern_arc_height
 
-        direction = self._normalize_vector(probe_direction)
-        lift = (
-            -direction[0] * self._micro_pattern_arc_height,
-            -direction[1] * self._micro_pattern_arc_height,
-            -direction[2] * self._micro_pattern_arc_height,
+        self._publish_feedback(
+            stage,
+            started_at,
+            step_index,
+            total_steps,
+            None,
+            probe_direction,
         )
-        lower = (-lift[0], -lift[1], -lift[2])
-
-        for stage, stage_displacement in (
-            ("micro_pattern_arc_lift", lift),
-            ("micro_pattern_arc_traverse", displacement),
-            ("micro_pattern_arc_lower", lower),
-        ):
-            self._publish_feedback(
-                stage,
-                started_at,
-                step_index,
-                total_steps,
-                None,
-                probe_direction,
-            )
-            move_success, move_error_code = self._move_micro(stage_displacement, self._search_traverse_timeout)
-            if not move_success:
-                self._abort("%s_failed" % stage, move_error_code)
-                return False
+        move_success, move_error_code = self._move_micro(
+            displacement,
+            self._search_traverse_timeout,
+            arc_direction=arc_direction,
+            arc_height=arc_height,
+        )
+        if not move_success:
+            self._abort("%s_failed" % stage, move_error_code)
+            return False
         return True
 
     def _validate_pose_frame(self, pose: PoseStamped, error_code: str) -> bool:
@@ -663,7 +649,7 @@ class SearchPortActionServer:
             return False, result.error_code or result.message
         return True, ""
 
-    def _move_micro(self, displacement_xyz, timeout: float) -> tuple[bool, str]:
+    def _move_micro(self, displacement_xyz, timeout: float, arc_direction=None, arc_height: float = 0.0) -> tuple[bool, str]:
         goal = MicroMoveGoal()
         goal.displacement.x = float(displacement_xyz[0])
         goal.displacement.y = float(displacement_xyz[1])
@@ -671,6 +657,11 @@ class SearchPortActionServer:
         goal.max_velocity = float(self._micro_pattern_max_velocity)
         goal.max_acceleration = float(self._micro_pattern_max_acceleration)
         goal.max_jerk = float(self._micro_pattern_max_jerk)
+        if arc_direction is not None:
+            goal.arc_direction.x = float(arc_direction[0])
+            goal.arc_direction.y = float(arc_direction[1])
+            goal.arc_direction.z = float(arc_direction[2])
+        goal.arc_height = float(arc_height)
         goal.timeout = float(timeout)
         goal.monitor_tf = True
 
