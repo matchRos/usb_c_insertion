@@ -1,0 +1,16 @@
+float32 timeout
+bool zero_ft_before_verify
+---
+bool success
+bool verified
+string message
+string error_code
+string failure_reason
+geometry_msgs/PoseStamped verified_pose
+float32 counterforce_y
+float32 counterforce_z
+---
+string stage
+float32 elapsed
+float32 counterforce_y
+float32 counterforce_z

@@ -6,8 +6,8 @@ motion:
   move_speed: 0.05
   max_linear_speed: 0.3
   max_angular_speed: 0.4
-  max_linear_acceleration: 0.07
-  max_angular_acceleration: 0.15
+  max_linear_acceleration: 0.1
+  max_angular_acceleration: 0.3
   twist_smoothing_alpha: 0.25
   watchdog_timeout: 0.1
   pose_servo_position_gain: 1.5
@@ -30,8 +30,8 @@ motion:
 micro_motion:
   max_distance: 0.02
   max_velocity: 0.10
-  max_acceleration: 0.5
-  max_jerk: 20.0
+  max_acceleration: 0.4
+  max_jerk: 15.0
   min_duration: 0.04
   max_duration: 1.0
   monitor_tf: true
@@ -81,6 +81,10 @@ search:
   probe_max_travel: 0.004
   contact_force_target: 2.0
   socket_depth_threshold: 0.002
+  verify_initial_contact: true
+  verify_candidates: true
+  verification_required: true
+  verify_timeout: 2.0
   direct_stop_repeat_count: 10
   direct_stop_interval: 0.001
 
@@ -94,6 +98,9 @@ insert:
   release_force_threshold: 2.0
 
 verify:
+  action_name: "verify_insertion"
+  action_timeout: 2.0
+  zero_ft_before_verify: false
   move_distance_y: 0.00025
   move_distance_z: 0.00025
   move_speed: 0.002
@@ -103,10 +110,10 @@ verify:
   settle_time: 0.1
 
 extract:
-  distance: 0.02
+  distance: 0.05
   pull_force_target: 8.0
   pull_force_tolerance: 1.0
-  pull_force_gain: 0.001
+  pull_force_gain: 0.002
   max_pull_speed: 0.006
   tool_z_direction_sign: -1.0
   wiggle_speed_y: 0.002
@@ -114,7 +121,7 @@ extract:
   wiggle_frequency: 2.0
   timeout: 8.0
   max_lateral_force: 25.0
-  max_torque_norm: 3.0
+  max_torque_norm: 5.0
   release_after_extract: true
 
 gripper:

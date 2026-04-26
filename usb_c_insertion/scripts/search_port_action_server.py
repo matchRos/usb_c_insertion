@@ -30,6 +30,8 @@ from usb_c_insertion.msg import (
     SearchPortAction,
     SearchPortFeedback,
     SearchPortResult,
+    VerifyInsertionAction,
+    VerifyInsertionGoal,
 )
 
 
@@ -47,6 +49,9 @@ class SearchPortActionServer:
         self._action_name = str(rospy.get_param("~action_name", "search_port")).strip()
         self._move_action_name = str(rospy.get_param("~move_action_name", "move_to_pose")).strip()
         self._micro_move_action_name = str(rospy.get_param("~micro_move_action_name", "micro_move")).strip()
+        self._verify_insertion_action_name = str(
+            rospy.get_param("~verify/action_name", "verify_insertion")
+        ).strip()
         self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link")).strip()
         self._twist_topic = str(rospy.get_param("~topics/twist_cmd", "/twist_controller/command")).strip()
         self._micro_motion_active_topic = str(
@@ -94,6 +99,15 @@ class SearchPortActionServer:
         self._search_probe_timeout = float(rospy.get_param("~search/probe_timeout", 1.8))
         self._search_probe_max_travel = float(rospy.get_param("~search/probe_max_travel", 0.004))
         self._search_socket_depth_threshold = float(rospy.get_param("~search/socket_depth_threshold", 0.002))
+        self._search_verify_initial_contact = bool(rospy.get_param("~search/verify_initial_contact", True))
+        self._search_verify_candidates = bool(rospy.get_param("~search/verify_candidates", True))
+        self._search_verification_required = bool(rospy.get_param("~search/verification_required", True))
+        self._search_verify_timeout = float(
+            rospy.get_param(
+                "~search/verify_timeout",
+                rospy.get_param("~verify/action_timeout", 2.0),
+            )
+        )
         self._search_direct_stop_repeat_count = int(rospy.get_param("~search/direct_stop_repeat_count", 10))
         self._search_direct_stop_interval = max(
             0.0,
@@ -142,8 +156,13 @@ class SearchPortActionServer:
             latch=True,
         )
         self._direct_probe_control_active = False
+        self._verify_insertion_available = False
         self._move_client = actionlib.SimpleActionClient(self._move_action_name, MoveToPoseAction)
         self._micro_move_client = actionlib.SimpleActionClient(self._micro_move_action_name, MicroMoveAction)
+        self._verify_insertion_client = actionlib.SimpleActionClient(
+            self._verify_insertion_action_name,
+            VerifyInsertionAction,
+        )
         self._server = actionlib.SimpleActionServer(
             self._action_name,
             SearchPortAction,
@@ -163,6 +182,8 @@ class SearchPortActionServer:
             return
         if not self._micro_move_client.wait_for_server(rospy.Duration.from_sec(5.0)):
             self._abort("micro_move_action_unavailable")
+            return
+        if not self._verify_insertion_ready():
             return
 
         if not self._validate_pose_frame(goal.port_pose, "unsupported_port_pose_frame"):
@@ -238,6 +259,31 @@ class SearchPortActionServer:
 
         wall_contact_point = self._make_point_stamped(reference_point)
         self._publish_feedback("initial_surface_reference_ready", started_at, 0, 0, reference_point, probe_direction)
+        initial_verification_ok, initial_verified, initial_verify_result = self._verify_current_insertion(
+            stage="initial_contact_verification",
+            started_at=started_at,
+            step_index=0,
+            total_steps=0,
+            reference_point=reference_point,
+            probe_direction=probe_direction,
+            enabled=self._search_verify_initial_contact,
+            accept_if_disabled=False,
+        )
+        if not initial_verification_ok:
+            return
+        if initial_verified:
+            result = self._make_result(True, True, "initial_contact_verified_port", "", "")
+            result.wall_contact_point = wall_contact_point
+            result.found_pose = self._current_pose_or_empty()
+            if initial_verify_result is not None:
+                result.contact_force = float(
+                    max(initial_verify_result.counterforce_y, initial_verify_result.counterforce_z)
+                )
+            else:
+                result.contact_force = float(initial_force)
+            result.completed_steps = 0
+            self._server.set_succeeded(result)
+            return
 
         try:
             pattern = self._generate_search_pattern()
@@ -349,14 +395,36 @@ class SearchPortActionServer:
                 probe_direction,
             )
             if probe_reason == "socket_depth_reached":
-                result = self._make_result(True, True, "potential_port_found", "", "")
-                result.wall_contact_point = wall_contact_point
-                result.found_pose = self._current_pose_or_empty()
-                result.inserted_depth = float(inserted_depth)
-                result.contact_force = float(contact_force)
-                result.completed_steps = step_index
-                self._server.set_succeeded(result)
-                return
+                verification_ok, verified, verify_result = self._verify_current_insertion(
+                    stage="candidate_verification",
+                    started_at=started_at,
+                    step_index=step_index,
+                    total_steps=total_steps,
+                    reference_point=surface_point,
+                    probe_direction=probe_direction,
+                    enabled=self._search_verify_candidates,
+                    accept_if_disabled=True,
+                )
+                if not verification_ok:
+                    return
+                if verified:
+                    result = self._make_result(True, True, "verified_port_found", "", "")
+                    result.wall_contact_point = wall_contact_point
+                    result.found_pose = self._current_pose_or_empty()
+                    result.inserted_depth = float(inserted_depth)
+                    result.contact_force = float(contact_force)
+                    result.completed_steps = step_index
+                    self._server.set_succeeded(result)
+                    return
+
+                reason = verify_result.failure_reason if verify_result is not None else "verification_skipped"
+                rospy.logwarn(
+                    "[usb_c_insertion] event=search_candidate_rejected step=%d reason=%s inserted_depth=%.4f contact_force=%.3f",
+                    int(step_index),
+                    reason,
+                    float(inserted_depth),
+                    float(contact_force),
+                )
 
         result = self._make_result(False, False, "search_pattern_exhausted", "search_pattern_exhausted", "")
         result.wall_contact_point = wall_contact_point
@@ -366,6 +434,84 @@ class SearchPortActionServer:
         result.completed_steps = total_steps
         self._robot.stop_motion()
         self._server.set_aborted(result)
+
+    def _verify_insertion_ready(self) -> bool:
+        if not self._search_verify_initial_contact and not self._search_verify_candidates:
+            return True
+
+        self._verify_insertion_available = self._verify_insertion_client.wait_for_server(
+            rospy.Duration.from_sec(5.0)
+        )
+        if self._verify_insertion_available:
+            return True
+
+        message = "verify_insertion_action_unavailable"
+        if self._search_verification_required:
+            self._abort(message)
+            return False
+
+        rospy.logwarn("[usb_c_insertion] event=%s verification_required=false", message)
+        return True
+
+    def _verify_current_insertion(
+        self,
+        stage: str,
+        started_at: rospy.Time,
+        step_index: int,
+        total_steps: int,
+        reference_point,
+        probe_direction,
+        enabled: bool,
+        accept_if_disabled: bool,
+    ):
+        if not enabled:
+            return True, bool(accept_if_disabled), None
+        if not self._verify_insertion_available:
+            if self._search_verification_required:
+                self._abort("verify_insertion_action_unavailable")
+                return False, False, None
+            rospy.logwarn("[usb_c_insertion] event=verify_insertion_skipped reason=action_unavailable")
+            return True, bool(accept_if_disabled), None
+
+        self._publish_feedback(stage, started_at, step_index, total_steps, reference_point, probe_direction)
+
+        goal = VerifyInsertionGoal()
+        goal.timeout = float(self._search_verify_timeout)
+        goal.zero_ft_before_verify = False
+        self._verify_insertion_client.send_goal(goal)
+        finished = self._verify_insertion_client.wait_for_result(
+            rospy.Duration.from_sec(max(1.0, self._search_verify_timeout * 2.0 + 1.0))
+        )
+        if not finished:
+            self._verify_insertion_client.cancel_goal()
+            if self._search_verification_required:
+                self._abort("verify_insertion_action_timeout")
+                return False, False, None
+            rospy.logwarn("[usb_c_insertion] event=verify_insertion_skipped reason=action_timeout")
+            return True, bool(accept_if_disabled), None
+
+        result = self._verify_insertion_client.get_result()
+        if result is None or not bool(result.success):
+            reason = result.failure_reason if result is not None else "verify_insertion_no_result"
+            if self._search_verification_required:
+                self._abort(reason)
+                return False, False, None
+            rospy.loginfo(
+                "[usb_c_insertion] event=verify_insertion_result stage=%s verified=false reason=%s",
+                stage,
+                reason,
+            )
+            return True, False, result
+
+        rospy.loginfo(
+            "[usb_c_insertion] event=verify_insertion_result stage=%s verified=%s counterforce_y=%.3f counterforce_z=%.3f reason=%s",
+            stage,
+            str(bool(result.verified)).lower(),
+            float(result.counterforce_y),
+            float(result.counterforce_z),
+            result.failure_reason or result.message,
+        )
+        return True, bool(result.verified), result
 
     def _validate_pose_frame(self, pose: PoseStamped, error_code: str) -> bool:
         frame_id = pose.header.frame_id.strip() or self._base_frame

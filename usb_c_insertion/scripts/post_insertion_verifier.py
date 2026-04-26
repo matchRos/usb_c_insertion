@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import math
 import os
 import sys
-from typing import Tuple
+from typing import Optional, Tuple
 
 import rospy
 
@@ -55,7 +55,7 @@ class PostInsertionVerifier:
         self._counterforce_threshold_z = float(rospy.get_param("~verify/counterforce_threshold_z", 5.0))
         self._settle_time = float(rospy.get_param("~verify/settle_time", 0.1))
 
-    def verify_retention(self) -> PostInsertionVerificationResult:
+    def verify_retention(self, move_timeout: Optional[float] = None) -> PostInsertionVerificationResult:
         """
         Run the retention check while keeping the gripper closed.
         """
@@ -73,6 +73,7 @@ class PostInsertionVerifier:
             force_axis="y",
             threshold=self._counterforce_threshold_y,
             move_name="verify_retention_y",
+            move_timeout=move_timeout,
         )
         if not y_ok:
             return PostInsertionVerificationResult(False, "counterforce_y_not_detected", counterforce_y, 0.0)
@@ -84,6 +85,7 @@ class PostInsertionVerifier:
             force_axis="z",
             threshold=self._counterforce_threshold_z,
             move_name="verify_retention_z",
+            move_timeout=move_timeout,
         )
         if not z_ok:
             return PostInsertionVerificationResult(False, "counterforce_z_not_detected", counterforce_y, counterforce_z)
@@ -98,6 +100,7 @@ class PostInsertionVerifier:
         force_axis: str,
         threshold: float,
         move_name: str,
+        move_timeout: Optional[float],
     ) -> Tuple[float, bool]:
         world_offset = self._rotate_vector_by_quaternion(
             local_offset_xyz[0],
@@ -118,7 +121,7 @@ class PostInsertionVerifier:
             reference_pose.pose.orientation.w,
         )
 
-        if not self._move_to_pose(target_x, target_y, target_z, orientation, move_name):
+        if not self._move_to_pose(target_x, target_y, target_z, orientation, move_name, move_timeout):
             return 0.0, False
 
         rospy.sleep(max(0.0, self._settle_time))
@@ -137,10 +140,19 @@ class PostInsertionVerifier:
             reference_pose.pose.position.z,
             orientation,
             move_name + "_return",
+            move_timeout,
         )
         return counterforce, counterforce >= threshold
 
-    def _move_to_pose(self, x: float, y: float, z: float, orientation_xyzw, move_name: str) -> bool:
+    def _move_to_pose(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        orientation_xyzw,
+        move_name: str,
+        move_timeout: Optional[float],
+    ) -> bool:
         self._robot.send_pose_target(
             x,
             y,
@@ -152,7 +164,8 @@ class PostInsertionVerifier:
         )
         self._robot.enable_pose_servo(True)
 
-        deadline = rospy.Time.now() + rospy.Duration.from_sec(self._move_timeout)
+        timeout = self._move_timeout if move_timeout is None or move_timeout <= 0.0 else float(move_timeout)
+        deadline = rospy.Time.now() + rospy.Duration.from_sec(timeout)
         rate = rospy.Rate(max(1.0, self._command_rate))
         while not rospy.is_shutdown():
             if rospy.Time.now() > deadline:

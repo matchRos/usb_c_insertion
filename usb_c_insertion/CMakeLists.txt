@@ -76,6 +76,7 @@ add_action_files(
   MoveToPose.action
   ProbeSurface.action
   SearchPort.action
+  VerifyInsertion.action
 )
 
 ## Generate added messages and services with any dependencies listed here
@@ -187,6 +188,7 @@ catkin_install_python(PROGRAMS
   scripts/run_vision_service.py
   scripts/search_port_action_server.py
   scripts/twist_controller_node.py
+  scripts/verify_insertion_action_server.py
   scripts/vision_pose_publisher.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
