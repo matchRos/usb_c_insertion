@@ -1,0 +1,21 @@
+geometry_msgs/Vector3 displacement
+float32 max_velocity
+float32 max_acceleration
+float32 max_jerk
+float32 timeout
+bool monitor_tf
+---
+bool success
+string message
+string error_code
+geometry_msgs/PoseStamped final_pose
+float32 commanded_distance
+float32 measured_distance
+float32 duration
+---
+string stage
+float32 elapsed
+float32 duration
+float32 commanded_distance
+float32 measured_distance
+float32 commanded_speed

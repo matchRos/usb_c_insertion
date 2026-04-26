@@ -22,6 +22,12 @@
         output="screen"/>
 
     <node
+        name="usb_c_insertion_micro_move_action_server"
+        pkg="usb_c_insertion"
+        type="micro_move_action_server.py"
+        output="screen"/>
+
+    <node
         name="usb_c_insertion_pose_servo"
         pkg="usb_c_insertion"
         type="pose_servo_node.py"

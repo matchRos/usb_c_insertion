@@ -6,6 +6,7 @@ import math
 
 from geometry_msgs.msg import Twist
 import rospy
+from std_msgs.msg import Bool
 
 
 class TwistControllerNode:
@@ -20,6 +21,10 @@ class TwistControllerNode:
     def __init__(self):
         self._input_topic = rospy.get_param("~topics/raw_twist_cmd", "/usb_c_insertion/raw_twist_cmd")
         self._output_topic = rospy.get_param("~topics/twist_cmd", "/twist_controller/command")
+        self._micro_motion_active_topic = rospy.get_param(
+            "~topics/micro_motion_active",
+            "/usb_c_insertion/micro_motion_active",
+        )
 
         self._command_rate = float(rospy.get_param("~motion/command_rate", 500.0))
         self._watchdog_timeout = float(rospy.get_param("~motion/watchdog_timeout", 0.1))
@@ -32,15 +37,29 @@ class TwistControllerNode:
         self._target_twist = Twist()
         self._current_twist = Twist()
         self._last_command_time = rospy.Time(0)
+        self._micro_motion_active = False
 
         self._publisher = rospy.Publisher(self._output_topic, Twist, queue_size=10)
         self._subscriber = rospy.Subscriber(self._input_topic, Twist, self._command_callback, queue_size=10)
+        self._micro_motion_active_subscriber = rospy.Subscriber(
+            self._micro_motion_active_topic,
+            Bool,
+            self._micro_motion_active_callback,
+            queue_size=1,
+        )
         rospy.on_shutdown(self._handle_shutdown)
 
     def spin(self) -> None:
         rate = rospy.Rate(max(1.0, self._command_rate))
         dt = 1.0 / max(1.0, self._command_rate)
         while not rospy.is_shutdown():
+            if self._micro_motion_active:
+                self._target_twist = Twist()
+                self._current_twist = Twist()
+                self._last_command_time = rospy.Time(0)
+                rate.sleep()
+                continue
+
             desired_twist = self._get_watchdog_safe_target()
             limited_target = self._apply_speed_limits(desired_twist)
             filtered_target = self._blend_twists(self._current_twist, limited_target, self._twist_alpha)
@@ -51,6 +70,14 @@ class TwistControllerNode:
     def _command_callback(self, msg: Twist) -> None:
         self._target_twist = msg
         self._last_command_time = rospy.Time.now()
+
+    def _micro_motion_active_callback(self, msg: Bool) -> None:
+        self._micro_motion_active = bool(msg.data)
+        if self._micro_motion_active:
+            self._target_twist = Twist()
+            self._current_twist = Twist()
+            self._last_command_time = rospy.Time(0)
+            self._publisher.publish(self._to_controller_frame(Twist()))
 
     def _get_watchdog_safe_target(self) -> Twist:
         if self._last_command_time == rospy.Time(0):

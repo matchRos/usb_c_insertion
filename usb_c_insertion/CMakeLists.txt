@@ -72,6 +72,7 @@ add_service_files(
 add_action_files(
   FILES
   ApplyYawCorrection.action
+  MicroMove.action
   MoveToPose.action
   ProbeSurface.action
   SearchPort.action
@@ -179,6 +180,7 @@ catkin_install_python(PROGRAMS
   scripts/extract_cable.py
   scripts/insertion_state_machine.py
   scripts/move_to_pose_action_server.py
+  scripts/micro_move_action_server.py
   scripts/photo_pose_workflow_example.py
   scripts/pose_servo_node.py
   scripts/probe_surface_action_server.py

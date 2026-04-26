@@ -22,6 +22,8 @@ from robot_interface import RobotInterface
 from search_pattern import generate_centered_raster_pattern, generate_preferred_square_spiral_pattern
 from tf_interface import TFInterface
 from usb_c_insertion.msg import (
+    MicroMoveAction,
+    MicroMoveGoal,
     MoveToPoseAction,
     MoveToPoseGoal,
     SearchPortAction,
@@ -44,9 +46,15 @@ class SearchPortActionServer:
     def __init__(self):
         self._action_name = str(rospy.get_param("~action_name", "search_port")).strip()
         self._move_action_name = str(rospy.get_param("~move_action_name", "move_to_pose")).strip()
+        self._micro_move_action_name = str(rospy.get_param("~micro_move_action_name", "micro_move")).strip()
         self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link")).strip()
 
         self._search_pattern = str(rospy.get_param("~search/pattern", "spiral")).strip().lower()
+        self._micro_pattern_preview_enabled = bool(rospy.get_param("~search/micro_pattern_preview_enabled", True))
+        self._micro_pattern_dwell_time = float(rospy.get_param("~search/micro_pattern_dwell_time", 0.5))
+        self._micro_pattern_max_velocity = float(rospy.get_param("~search/micro_pattern_max_velocity", 0.0))
+        self._micro_pattern_max_acceleration = float(rospy.get_param("~search/micro_pattern_max_acceleration", 0.0))
+        self._micro_pattern_max_jerk = float(rospy.get_param("~search/micro_pattern_max_jerk", 0.0))
         self._search_step_y = float(rospy.get_param("~search/step_y", 0.001))
         self._search_step_z = float(rospy.get_param("~search/step_z", 0.001))
         self._search_width = float(rospy.get_param("~search/max_search_width", 0.02))
@@ -140,6 +148,7 @@ class SearchPortActionServer:
         )
         self._wall_probe = WallProbe(self._robot, self._tf, self._contact_detector)
         self._move_client = actionlib.SimpleActionClient(self._move_action_name, MoveToPoseAction)
+        self._micro_move_client = actionlib.SimpleActionClient(self._micro_move_action_name, MicroMoveAction)
         self._server = actionlib.SimpleActionServer(
             self._action_name,
             SearchPortAction,
@@ -155,6 +164,11 @@ class SearchPortActionServer:
 
         if not self._move_client.wait_for_server(rospy.Duration.from_sec(5.0)):
             self._abort("move_action_unavailable")
+            return
+        if self._micro_pattern_preview_enabled and not self._micro_move_client.wait_for_server(
+            rospy.Duration.from_sec(5.0)
+        ):
+            self._abort("micro_move_action_unavailable")
             return
 
         if not self._validate_pose_frame(goal.port_pose, "unsupported_port_pose_frame"):
@@ -177,7 +191,7 @@ class SearchPortActionServer:
             self._abort("search_geometry_failed: %s" % exc, "search_geometry_failed")
             return
 
-        if self._search_zero_ft_before_search:
+        if self._search_zero_ft_before_search and not self._micro_pattern_preview_enabled:
             self._publish_feedback("zero_ft_before_search", started_at, 0, 0, None, probe_direction)
             if not self._ft.zero_sensor():
                 self._abort("zero_ft_before_search_failed")
@@ -192,6 +206,15 @@ class SearchPortActionServer:
         )
         if not move_success:
             self._abort("move_to_port_precontact_failed", move_error_code)
+            return
+
+        if self._micro_pattern_preview_enabled:
+            self._execute_micro_pattern_preview(
+                started_at,
+                timeout,
+                wall_tangent,
+                probe_direction,
+            )
             return
 
         self._publish_feedback("approach_wall_near_port", started_at, 0, 0, None, probe_direction)
@@ -420,6 +443,76 @@ class SearchPortActionServer:
         self._robot.stop_motion()
         self._server.set_aborted(result)
 
+    def _execute_micro_pattern_preview(
+        self,
+        started_at: rospy.Time,
+        timeout: float,
+        wall_tangent,
+        probe_direction,
+    ) -> None:
+        try:
+            pattern = self._generate_search_pattern()
+        except ValueError as exc:
+            self._abort("search_pattern_invalid: %s" % exc, "search_pattern_invalid")
+            return
+
+        total_steps = len(pattern)
+        rospy.loginfo(
+            "[usb_c_insertion] event=micro_pattern_preview_start pattern=%s steps=%d dwell_time=%.3f",
+            self._search_pattern,
+            total_steps,
+            self._micro_pattern_dwell_time,
+        )
+
+        for step_index, offset in enumerate(pattern, start=1):
+            if self._server.is_preempt_requested():
+                self._robot.stop_motion()
+                self._micro_move_client.cancel_goal()
+                self._server.set_preempted(
+                    self._make_result(False, False, "preempted", "preempted", "preempted")
+                )
+                return
+            if rospy.is_shutdown():
+                self._abort("shutdown_during_micro_pattern")
+                return
+            if (rospy.Time.now() - started_at).to_sec() > timeout:
+                self._abort("micro_pattern_timeout")
+                return
+
+            displacement = (
+                offset.dx * wall_tangent[0],
+                offset.dx * wall_tangent[1],
+                offset.dy,
+            )
+            self._publish_feedback(
+                "micro_pattern_move",
+                started_at,
+                step_index,
+                total_steps,
+                None,
+                probe_direction,
+            )
+            move_success, move_error_code = self._move_micro(displacement, self._search_traverse_timeout)
+            if not move_success:
+                self._abort("micro_pattern_move_failed", move_error_code)
+                return
+
+            self._publish_feedback(
+                "micro_pattern_dwell",
+                started_at,
+                step_index,
+                total_steps,
+                None,
+                probe_direction,
+            )
+            if not self._sleep_interruptible(self._micro_pattern_dwell_time):
+                return
+
+        result = self._make_result(True, False, "micro_pattern_preview_complete", "", "")
+        result.found_pose = self._current_pose_or_empty()
+        result.completed_steps = total_steps
+        self._server.set_succeeded(result)
+
     def _validate_pose_frame(self, pose: PoseStamped, error_code: str) -> bool:
         frame_id = pose.header.frame_id.strip() or self._base_frame
         if frame_id == self._base_frame:
@@ -502,6 +595,48 @@ class SearchPortActionServer:
         if not result.success:
             return False, result.error_code or result.message
         return True, ""
+
+    def _move_micro(self, displacement_xyz, timeout: float) -> tuple[bool, str]:
+        goal = MicroMoveGoal()
+        goal.displacement.x = float(displacement_xyz[0])
+        goal.displacement.y = float(displacement_xyz[1])
+        goal.displacement.z = float(displacement_xyz[2])
+        goal.max_velocity = float(self._micro_pattern_max_velocity)
+        goal.max_acceleration = float(self._micro_pattern_max_acceleration)
+        goal.max_jerk = float(self._micro_pattern_max_jerk)
+        goal.timeout = float(timeout)
+        goal.monitor_tf = True
+
+        self._micro_move_client.send_goal(goal)
+        wait_timeout = max(1.0, float(timeout) + 0.5)
+        finished = self._micro_move_client.wait_for_result(rospy.Duration.from_sec(wait_timeout))
+        if not finished:
+            self._micro_move_client.cancel_goal()
+            return False, "micro_move_wait_timeout"
+
+        result = self._micro_move_client.get_result()
+        if result is None:
+            return False, "micro_move_no_result"
+        if not result.success:
+            return False, result.error_code or result.message
+        return True, ""
+
+    def _sleep_interruptible(self, duration: float) -> bool:
+        deadline = rospy.Time.now() + rospy.Duration.from_sec(max(0.0, float(duration)))
+        rate = rospy.Rate(100.0)
+        while not rospy.is_shutdown() and rospy.Time.now() < deadline:
+            if self._server.is_preempt_requested():
+                self._robot.stop_motion()
+                self._micro_move_client.cancel_goal()
+                self._server.set_preempted(
+                    self._make_result(False, False, "preempted", "preempted", "preempted")
+                )
+                return False
+            rate.sleep()
+        if rospy.is_shutdown():
+            self._abort("shutdown_during_micro_pattern_dwell")
+            return False
+        return True
 
     def _move_to_xyz(
         self,
