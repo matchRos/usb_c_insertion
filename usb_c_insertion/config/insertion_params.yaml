@@ -37,6 +37,7 @@ contact:
 
 probe:
   retract_distance: 0.005
+  surface_retract_distance: 0.0015
   inter_probe_backoff_distance: 0.01
   second_probe_y_offset: 0.02
   max_probe_distance: 0.2
@@ -67,7 +68,7 @@ search:
   pre_probe_approach_speed: 0.001
   zero_ft_before_search: true
   probe_speed: 0.01
-  probe_timeout: 0.8
+  probe_timeout: 1.8
   probe_max_travel: 0.004
   contact_force_target: 2.0
   contact_force_tolerance: 0.5

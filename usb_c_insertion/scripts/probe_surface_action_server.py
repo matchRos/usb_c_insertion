@@ -73,6 +73,9 @@ class ProbeSurfaceActionServer:
         )
         self._second_probe_y_offset = float(rospy.get_param("~probe/second_probe_y_offset", 0.02))
         self._inter_probe_backoff_distance = float(rospy.get_param("~probe/inter_probe_backoff_distance", 0.01))
+        self._surface_retract_distance = float(
+            rospy.get_param("~probe/surface_retract_distance", rospy.get_param("~probe/retract_distance", 0.005))
+        )
         self._probe_timeout = float(rospy.get_param("~probe/probe_timeout", 10.0))
         self._settle_time = float(rospy.get_param("~motion/action_settle_time", 0.4))
         self._force_threshold_x = float(rospy.get_param("~contact/force_threshold_x", 2.0))
@@ -170,6 +173,7 @@ class ProbeSurfaceActionServer:
             axis_name=contact_axis,
             threshold=self._force_threshold_x,
             timeout=self._probe_timeout,
+            retract_distance=self._surface_retract_distance,
         )
         if not probe_result_1.success or probe_result_1.contact_point is None:
             self._abort(
@@ -210,6 +214,7 @@ class ProbeSurfaceActionServer:
             axis_name=contact_axis,
             threshold=self._force_threshold_x,
             timeout=self._probe_timeout,
+            retract_distance=self._surface_retract_distance,
         )
         if not probe_result_2.success or probe_result_2.contact_point is None:
             self._abort(
