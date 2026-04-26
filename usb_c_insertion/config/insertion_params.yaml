@@ -48,7 +48,7 @@ search:
   step_z: 0.0015
   max_search_width: 0.015
   max_search_height: 0.015
-  search_timeout: 35.0
+  search_timeout: 70.0
   traverse_timeout: 1.2
   traverse_speed: 0.014
   traverse_tolerance: 0.0005
@@ -117,7 +117,7 @@ state_machine:
   enabled: true
   auto_zero_ft: true
   log_debug: true
-  target_offset_tool_x: -0.035
+  target_offset_tool_x: -0.017
   target_offset_tool_y: -0.01
   prepose_offset: -0.01
   precontact_offset_tool_x: -0.000
@@ -128,6 +128,10 @@ state_machine:
   position_tolerance: 0.002
 
 workflow:
+  refine_vision_enabled: true
+  refine_vision_required: true
+  refine_camera_frame: "zedm_left_camera_optical_frame"
+  refine_camera_distance: 0.12
   photo_pose_max_linear_speed: 0.12
   photo_pose_max_angular_speed: 0.35
   prepose_max_linear_speed: 0.10

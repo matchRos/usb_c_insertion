@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import os
 import sys
+from typing import Tuple
 
 import actionlib
 from geometry_msgs.msg import PoseStamped
@@ -14,6 +15,12 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
+from prepose_planner import (
+    normalize_quaternion,
+    normalize_vector,
+    rotate_vector_by_quaternion,
+)
+from tf_interface import TFInterface
 from usb_c_insertion.msg import (
     ApplyYawCorrectionAction,
     ApplyYawCorrectionGoal,
@@ -52,8 +59,16 @@ class PhotoPoseWorkflowExample:
         self._settle_time = float(rospy.get_param("~photo_pose/settle_time", 0.4))
         self._timeout = float(rospy.get_param("~photo_pose/timeout", 20.0))
         self._require_fresh_vision = bool(rospy.get_param("~photo_pose/require_fresh_vision_result", True))
+        self._refine_vision_enabled = bool(rospy.get_param("~workflow/refine_vision_enabled", True))
+        self._refine_vision_required = bool(rospy.get_param("~workflow/refine_vision_required", True))
+        self._refine_camera_frame = str(
+            rospy.get_param("~workflow/refine_camera_frame", "zedm_left_camera_optical_frame")
+        ).strip()
+        self._tool_frame = str(rospy.get_param("~frames/tool_frame", "tool0_controller")).strip()
+        self._refine_camera_distance = float(rospy.get_param("~workflow/refine_camera_distance", 0.12))
 
         self._goal = self._load_goal_pose()
+        self._tf = TFInterface()
         self._client = actionlib.SimpleActionClient(self._action_name, MoveToPoseAction)
         self._probe_client = actionlib.SimpleActionClient(self._probe_action_name, ProbeSurfaceAction)
         self._apply_yaw_client = actionlib.SimpleActionClient(
@@ -79,9 +94,14 @@ class PhotoPoseWorkflowExample:
         if not self._move_to_photo_pose():
             return False
 
-        port_pose = self._run_vision()
+        port_pose = self._run_vision("coarse")
         if port_pose is None:
             return False
+
+        refined_port_pose = self._run_refined_vision(port_pose)
+        if refined_port_pose is None:
+            return False
+        port_pose = refined_port_pose
 
         pre_pose = self._compute_prepose(port_pose)
         if pre_pose is None:
@@ -147,7 +167,7 @@ class PhotoPoseWorkflowExample:
         )
         return True
 
-    def _run_vision(self) -> PoseStamped | None:
+    def _run_vision(self, label: str) -> PoseStamped | None:
         rospy.wait_for_service(self._vision_service_name, timeout=5.0)
         service = rospy.ServiceProxy(self._vision_service_name, RunVision)
         request = RunVisionRequest(require_fresh_result=self._require_fresh_vision)
@@ -161,13 +181,148 @@ class PhotoPoseWorkflowExample:
             return None
 
         rospy.loginfo(
-            "[usb_c_insertion] event=vision_result_received path=%s x=%.4f y=%.4f z=%.4f",
+            "[usb_c_insertion] event=vision_result_received label=%s path=%s x=%.4f y=%.4f z=%.4f",
+            label,
             response.json_path,
             response.port_pose.pose.position.x,
             response.port_pose.pose.position.y,
             response.port_pose.pose.position.z,
         )
         return response.port_pose
+
+    def _run_refined_vision(self, coarse_port_pose: PoseStamped) -> PoseStamped | None:
+        if not self._refine_vision_enabled:
+            return coarse_port_pose
+
+        camera_target = self._compute_refined_camera_target(coarse_port_pose)
+        if camera_target is None:
+            if self._refine_vision_required:
+                return None
+            rospy.logwarn("[usb_c_insertion] event=refined_vision_skipped reason=camera_target_unavailable")
+            return coarse_port_pose
+
+        if not self._move_to_named_pose(camera_target, "refined_camera_pose"):
+            if self._refine_vision_required:
+                return None
+            rospy.logwarn("[usb_c_insertion] event=refined_vision_skipped reason=refined_camera_move_failed")
+            return coarse_port_pose
+
+        refined_port_pose = self._run_vision("refined")
+        if refined_port_pose is None:
+            if self._refine_vision_required:
+                return None
+            rospy.logwarn("[usb_c_insertion] event=refined_vision_skipped reason=refined_vision_failed")
+            return coarse_port_pose
+
+        return refined_port_pose
+
+    def _compute_refined_camera_target(self, port_pose: PoseStamped) -> PoseStamped | None:
+        frame_id = port_pose.header.frame_id.strip() or self._base_frame
+        if frame_id != self._base_frame:
+            rospy.logerr(
+                "[usb_c_insertion] event=photo_pose_workflow_failed reason=refined_camera_unsupported_port_frame frame=%s",
+                frame_id,
+            )
+            return None
+
+        tool_to_camera = self._tf.lookup_transform(self._tool_frame, self._refine_camera_frame)
+        if tool_to_camera is None:
+            rospy.logerr(
+                "[usb_c_insertion] event=photo_pose_workflow_failed reason=refined_camera_tf_unavailable tool_frame=%s camera_frame=%s",
+                self._tool_frame,
+                self._refine_camera_frame,
+            )
+            return None
+
+        current_tool_pose = self._tf.get_tool_pose_in_base()
+        if current_tool_pose is None:
+            rospy.logerr(
+                "[usb_c_insertion] event=photo_pose_workflow_failed reason=refined_camera_tool_pose_unavailable"
+            )
+            return None
+
+        tool_quaternion = normalize_quaternion(
+            (
+                current_tool_pose.pose.orientation.x,
+                current_tool_pose.pose.orientation.y,
+                current_tool_pose.pose.orientation.z,
+                current_tool_pose.pose.orientation.w,
+            )
+        )
+
+        try:
+            target_camera_xyz = self._compute_desired_camera_position(port_pose)
+            tool_xyz = self._camera_target_to_tool_position(
+                target_camera_xyz,
+                tool_quaternion,
+                tool_to_camera,
+            )
+        except ValueError as exc:
+            rospy.logerr(
+                "[usb_c_insertion] event=photo_pose_workflow_failed reason=refined_camera_pose_failed message=%s",
+                exc,
+            )
+            return None
+
+        target_pose = PoseStamped()
+        target_pose.header.stamp = rospy.Time.now()
+        target_pose.header.frame_id = self._base_frame
+        target_pose.pose.position.x = tool_xyz[0]
+        target_pose.pose.position.y = tool_xyz[1]
+        target_pose.pose.position.z = tool_xyz[2]
+        target_pose.pose.orientation.x = tool_quaternion[0]
+        target_pose.pose.orientation.y = tool_quaternion[1]
+        target_pose.pose.orientation.z = tool_quaternion[2]
+        target_pose.pose.orientation.w = tool_quaternion[3]
+
+        rospy.loginfo(
+            "[usb_c_insertion] event=refined_camera_target_computed camera_frame=%s distance=%.4f tool_x=%.4f tool_y=%.4f tool_z=%.4f orientation_source=current_tcp",
+            self._refine_camera_frame,
+            self._refine_camera_distance,
+            tool_xyz[0],
+            tool_xyz[1],
+            tool_xyz[2],
+        )
+        return target_pose
+
+    def _compute_desired_camera_position(self, port_pose: PoseStamped) -> Tuple[float, float, float]:
+        port_quaternion = (
+            port_pose.pose.orientation.x,
+            port_pose.pose.orientation.y,
+            port_pose.pose.orientation.z,
+            port_pose.pose.orientation.w,
+        )
+        port_x_axis = rotate_vector_by_quaternion(1.0, 0.0, 0.0, *port_quaternion)
+        camera_z_axis = normalize_vector((-port_x_axis[0], -port_x_axis[1], -port_x_axis[2]))
+        return (
+            port_pose.pose.position.x - camera_z_axis[0] * self._refine_camera_distance,
+            port_pose.pose.position.y - camera_z_axis[1] * self._refine_camera_distance,
+            port_pose.pose.position.z - camera_z_axis[2] * self._refine_camera_distance,
+        )
+
+    def _camera_target_to_tool_position(
+        self,
+        camera_xyz,
+        tool_quaternion,
+        tool_to_camera,
+    ) -> Tuple[float, float, float]:
+        tool_camera_translation = (
+            tool_to_camera.transform.translation.x,
+            tool_to_camera.transform.translation.y,
+            tool_to_camera.transform.translation.z,
+        )
+        tool_camera_translation_in_base = rotate_vector_by_quaternion(
+            tool_camera_translation[0],
+            tool_camera_translation[1],
+            tool_camera_translation[2],
+            *tool_quaternion,
+        )
+        tool_xyz = (
+            camera_xyz[0] - tool_camera_translation_in_base[0],
+            camera_xyz[1] - tool_camera_translation_in_base[1],
+            camera_xyz[2] - tool_camera_translation_in_base[2],
+        )
+        return tool_xyz
 
     def _compute_prepose(self, port_pose: PoseStamped) -> PoseStamped | None:
         rospy.wait_for_service(self._prepose_service_name, timeout=5.0)
