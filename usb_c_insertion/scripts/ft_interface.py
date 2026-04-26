@@ -33,7 +33,7 @@ class FTInterface:
     def __init__(
         self,
         wrench_topic: str = "/wrench",
-        filter_window_size: int = 20,
+        filter_window_size: int = 5,
         wrench_timeout: float = 0.2,
         zero_service_name: str = "/ur_hardware_interface/zero_ftsensor",
     ):

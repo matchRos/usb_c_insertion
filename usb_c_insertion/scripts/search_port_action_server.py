@@ -8,8 +8,9 @@ import sys
 from typing import Optional, Tuple
 
 import actionlib
-from geometry_msgs.msg import PointStamped, PoseStamped
+from geometry_msgs.msg import PointStamped, PoseStamped, Twist
 import rospy
+from std_msgs.msg import Bool
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
@@ -30,17 +31,16 @@ from usb_c_insertion.msg import (
     SearchPortFeedback,
     SearchPortResult,
 )
-from wall_probe import WallProbe
 
 
 class SearchPortActionServer:
     """
     Search for the USB-C port around the estimated port pose.
 
-    The action assumes the TCP orientation has already been corrected. It uses
-    the supplied reference pose orientation, moves to a precontact pose around
-    the estimated port position, probes the wall, then executes a conservative
-    search pattern in the wall plane while maintaining light contact.
+    The action assumes the TCP orientation has already been corrected. It first
+    touches the wall once to establish the local surface reference, then moves
+    quickly between contact-free pre-probe positions and slowly probes along the
+    tool-z direction at each search point.
     """
 
     def __init__(self):
@@ -48,68 +48,57 @@ class SearchPortActionServer:
         self._move_action_name = str(rospy.get_param("~move_action_name", "move_to_pose")).strip()
         self._micro_move_action_name = str(rospy.get_param("~micro_move_action_name", "micro_move")).strip()
         self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link")).strip()
+        self._twist_topic = str(rospy.get_param("~topics/twist_cmd", "/twist_controller/command")).strip()
+        self._micro_motion_active_topic = str(
+            rospy.get_param("~topics/micro_motion_active", "/usb_c_insertion/micro_motion_active")
+        ).strip()
 
         self._search_pattern = str(rospy.get_param("~search/pattern", "spiral")).strip().lower()
-        self._micro_pattern_preview_enabled = bool(rospy.get_param("~search/micro_pattern_preview_enabled", True))
-        self._micro_pattern_dwell_time = float(rospy.get_param("~search/micro_pattern_dwell_time", 0.5))
-        self._micro_pattern_max_velocity = float(rospy.get_param("~search/micro_pattern_max_velocity", 0.0))
-        self._micro_pattern_max_acceleration = float(rospy.get_param("~search/micro_pattern_max_acceleration", 0.0))
-        self._micro_pattern_max_jerk = float(rospy.get_param("~search/micro_pattern_max_jerk", 0.0))
-        self._micro_pattern_arc_enabled = bool(rospy.get_param("~search/micro_pattern_arc_enabled", True))
-        self._micro_pattern_arc_height = max(0.0, float(rospy.get_param("~search/micro_pattern_arc_height", 0.004)))
         self._search_step_y = float(rospy.get_param("~search/step_y", 0.001))
         self._search_step_z = float(rospy.get_param("~search/step_z", 0.001))
         self._search_width = float(rospy.get_param("~search/max_search_width", 0.02))
         self._search_height = float(rospy.get_param("~search/max_search_height", 0.02))
         self._search_timeout = float(rospy.get_param("~search/search_timeout", 50.0))
-        self._search_traverse_timeout = float(rospy.get_param("~search/traverse_timeout", 4.0))
-        self._search_traverse_speed = float(
-            rospy.get_param(
-                "~search/traverse_speed",
-                rospy.get_param("~motion/search_traverse_speed", 0.012),
-            )
-        )
-        self._search_traverse_tolerance = float(rospy.get_param("~search/traverse_tolerance", 0.0003))
-        self._search_traverse_slowdown_distance = float(
-            rospy.get_param("~search/traverse_slowdown_distance", 0.003)
-        )
-        self._search_traverse_min_speed = float(rospy.get_param("~search/traverse_min_speed", 0.001))
-        self._search_lift_off_distance = float(rospy.get_param("~search/lift_off_distance", 0.0001))
-        self._search_fast_pre_probe_enabled = bool(rospy.get_param("~search/fast_pre_probe_enabled", True))
-        self._search_fast_pre_probe_clearance = float(
-            rospy.get_param("~search/fast_pre_probe_clearance", 0.003)
-        )
-        self._search_fast_pre_probe_speed = float(
-            rospy.get_param("~search/fast_pre_probe_speed", self._search_traverse_speed)
-        )
-        self._search_pre_probe_approach_fraction = self._clamp(
-            float(rospy.get_param("~search/pre_probe_approach_fraction", 0.9)),
-            0.0,
-            1.0,
-        )
-        self._search_diagonal_pre_probe_approach = bool(
-            rospy.get_param("~search/diagonal_pre_probe_approach", True)
-        )
         self._search_preferred_tool_x_sign = float(rospy.get_param("~search/preferred_tool_x_sign", -1.0))
         self._search_preferred_z_sign = float(rospy.get_param("~search/preferred_z_sign", 1.0))
         self._search_diagonal_first = bool(rospy.get_param("~search/diagonal_first", True))
-        self._search_lift_off_speed = float(rospy.get_param("~search/lift_off_speed", 0.001))
-        self._search_pre_probe_approach_speed = float(rospy.get_param("~search/pre_probe_approach_speed", 0.001))
+
+        self._search_transfer_timeout = float(rospy.get_param("~search/transfer_timeout", 1.2))
+        self._search_transfer_max_velocity = float(rospy.get_param("~search/transfer_max_velocity", 0.0))
+        self._search_transfer_max_acceleration = float(rospy.get_param("~search/transfer_max_acceleration", 0.0))
+        self._search_transfer_max_jerk = float(rospy.get_param("~search/transfer_max_jerk", 0.0))
+        self._search_transfer_arc_enabled = bool(rospy.get_param("~search/transfer_arc_enabled", True))
+        self._search_transfer_arc_height = max(0.0, float(rospy.get_param("~search/transfer_arc_height", 0.004)))
+        self._search_pre_probe_clearance = max(0.0, float(rospy.get_param("~search/pre_probe_clearance", 0.001)))
+        self._search_pre_probe_settle_time = max(
+            0.0,
+            float(rospy.get_param("~search/pre_probe_settle_time", 0.1)),
+        )
+        self._search_force_baseline_time = max(
+            0.0,
+            float(rospy.get_param("~search/force_baseline_time", 0.05)),
+        )
+
         self._search_contact_force_target = float(rospy.get_param("~search/contact_force_target", 2.0))
+        self._search_initial_probe_speed = float(
+            rospy.get_param("~search/initial_probe_speed", rospy.get_param("~search/probe_speed", 0.004))
+        )
+        self._search_initial_probe_max_travel = float(rospy.get_param("~search/initial_probe_max_travel", 0.02))
+        self._search_initial_probe_timeout = float(rospy.get_param("~search/initial_probe_timeout", 8.0))
         self._search_probe_speed = float(
             rospy.get_param(
                 "~search/probe_speed",
-                rospy.get_param("~search/force_control_speed_limit", 0.003),
+                0.004,
             )
         )
-        self._search_probe_timeout = float(
-            rospy.get_param(
-                "~search/probe_timeout",
-                rospy.get_param("~search/force_control_timeout", 2.0),
-            )
-        )
+        self._search_probe_timeout = float(rospy.get_param("~search/probe_timeout", 1.8))
         self._search_probe_max_travel = float(rospy.get_param("~search/probe_max_travel", 0.004))
         self._search_socket_depth_threshold = float(rospy.get_param("~search/socket_depth_threshold", 0.002))
+        self._search_direct_stop_repeat_count = int(rospy.get_param("~search/direct_stop_repeat_count", 10))
+        self._search_direct_stop_interval = max(
+            0.0,
+            float(rospy.get_param("~search/direct_stop_interval", 0.001)),
+        )
         self._search_zero_ft_before_search = bool(
             rospy.get_param(
                 "~search/zero_ft_before_search",
@@ -132,9 +121,6 @@ class SearchPortActionServer:
                 rospy.get_param("~state_machine/probe_offset_tool_y", 0.0),
             )
         )
-        self._max_probe_distance = float(rospy.get_param("~probe/max_probe_distance", 0.2))
-        self._probe_timeout = float(rospy.get_param("~probe/probe_timeout", 20.0))
-        self._force_threshold_x = float(rospy.get_param("~contact/force_threshold_x", 2.0))
         self._move_settle_time = float(rospy.get_param("~motion/action_settle_time", 0.4))
 
         self._robot = RobotInterface()
@@ -148,7 +134,14 @@ class SearchPortActionServer:
             self._ft,
             hysteresis=rospy.get_param("~contact/hysteresis", 0.5),
         )
-        self._wall_probe = WallProbe(self._robot, self._tf, self._contact_detector)
+        self._direct_twist_publisher = rospy.Publisher(self._twist_topic, Twist, queue_size=10)
+        self._micro_motion_active_publisher = rospy.Publisher(
+            self._micro_motion_active_topic,
+            Bool,
+            queue_size=1,
+            latch=True,
+        )
+        self._direct_probe_control_active = False
         self._move_client = actionlib.SimpleActionClient(self._move_action_name, MoveToPoseAction)
         self._micro_move_client = actionlib.SimpleActionClient(self._micro_move_action_name, MicroMoveAction)
         self._server = actionlib.SimpleActionServer(
@@ -157,6 +150,7 @@ class SearchPortActionServer:
             execute_cb=self._execute,
             auto_start=False,
         )
+        rospy.on_shutdown(self._handle_shutdown)
         self._server.start()
         rospy.loginfo("[usb_c_insertion] event=search_port_action_ready action=%s", self._action_name)
 
@@ -167,9 +161,7 @@ class SearchPortActionServer:
         if not self._move_client.wait_for_server(rospy.Duration.from_sec(5.0)):
             self._abort("move_action_unavailable")
             return
-        if self._micro_pattern_preview_enabled and not self._micro_move_client.wait_for_server(
-            rospy.Duration.from_sec(5.0)
-        ):
+        if not self._micro_move_client.wait_for_server(rospy.Duration.from_sec(5.0)):
             self._abort("micro_move_action_unavailable")
             return
 
@@ -193,19 +185,11 @@ class SearchPortActionServer:
             self._abort("search_geometry_failed: %s" % exc, "search_geometry_failed")
             return
 
-        if self._search_zero_ft_before_search and not self._micro_pattern_preview_enabled:
-            self._publish_feedback("zero_ft_before_search", started_at, 0, 0, None, probe_direction)
-            if not self._ft.zero_sensor():
-                self._abort("zero_ft_before_search_failed")
-                return
-            rospy.sleep(0.5)
-
         self._publish_feedback("move_to_port_precontact", started_at, 0, 0, None, probe_direction)
         rospy.loginfo(
-            "[usb_c_insertion] event=micro_pattern_preview_reference "
-            "enabled=%s precontact_offset_tool_z=%.4f port_xyz=(%.4f,%.4f,%.4f) "
+            "[usb_c_insertion] event=search_precontact_reference "
+            "precontact_offset_tool_z=%.4f port_xyz=(%.4f,%.4f,%.4f) "
             "precontact_xyz=(%.4f,%.4f,%.4f) probe_direction=(%.4f,%.4f,%.4f)",
-            self._micro_pattern_preview_enabled,
             self._precontact_offset_tool_z,
             goal.port_pose.pose.position.x,
             goal.port_pose.pose.position.y,
@@ -226,61 +210,34 @@ class SearchPortActionServer:
             self._abort("move_to_port_precontact_failed", move_error_code)
             return
 
-        if self._micro_pattern_preview_enabled:
-            self._execute_micro_pattern_preview(
-                started_at,
-                timeout,
-                wall_tangent,
-                probe_direction,
-            )
+        if self._search_zero_ft_before_search:
+            self._publish_feedback("zero_ft_before_search", started_at, 0, 0, None, probe_direction)
+            if not self._ft.zero_sensor():
+                self._abort("zero_ft_before_search_failed")
+                return
+            if not self._sleep_interruptible(0.2):
+                return
+
+        self._publish_feedback("initial_force_baseline", started_at, 0, 0, None, probe_direction)
+        if not self._capture_force_baseline(self._search_force_baseline_time):
             return
 
-        self._publish_feedback("approach_wall_near_port", started_at, 0, 0, None, probe_direction)
-        contact_axis = self._dominant_axis_name(probe_direction)
-        probe_result = self._wall_probe.probe_until_contact(
-            direction_xyz=probe_direction,
-            axis_name=contact_axis,
-            threshold=self._force_threshold_x,
-            max_travel_distance=self._max_probe_distance,
-            timeout=min(self._probe_timeout, timeout),
-            retract_distance=0.0,
-        )
-        if not probe_result.success or probe_result.contact_point is None:
-            self._abort(
-                "approach_wall_near_port_failed",
-                "approach_wall_%s" % probe_result.reason,
-                probe_result.reason,
-            )
-            return
-
-        reference_point = (
-            probe_result.contact_point.point.x,
-            probe_result.contact_point.point.y,
-            probe_result.contact_point.point.z,
-        )
-
-        self._publish_feedback("search_initial_probe", started_at, 0, 0, reference_point, probe_direction)
-        probe_success, probe_reason, inserted_depth, contact_force = self._probe_search_position(
-            reference_point,
+        self._publish_feedback("initial_surface_probe", started_at, 0, 0, None, probe_direction)
+        initial_success, initial_reason, reference_point, initial_force = self._probe_until_contact(
             probe_direction,
-            "initial",
-            0,
-            0,
+            speed=self._search_initial_probe_speed,
+            max_travel=max(self._search_initial_probe_max_travel, self._search_pre_probe_clearance),
+            timeout=min(self._search_initial_probe_timeout, timeout),
+            probe_label="initial",
+            step_index=0,
+            total_steps=0,
         )
-        if not probe_success:
-            self._abort("search_initial_probe_failed", probe_reason, probe_reason)
+        if not initial_success or reference_point is None:
+            self._abort("initial_surface_probe_failed", initial_reason, initial_reason)
             return
 
-        self._publish_feedback("search_initial_probe_complete", started_at, 0, 0, reference_point, probe_direction)
-        if probe_reason == "socket_depth_reached":
-            result = self._make_result(True, True, "potential_port_found", "", "")
-            result.wall_contact_point = probe_result.contact_point
-            result.found_pose = self._current_pose_or_empty()
-            result.inserted_depth = float(inserted_depth)
-            result.contact_force = float(contact_force)
-            result.completed_steps = 0
-            self._server.set_succeeded(result)
-            return
+        wall_contact_point = self._make_point_stamped(reference_point)
+        self._publish_feedback("initial_surface_reference_ready", started_at, 0, 0, reference_point, probe_direction)
 
         try:
             pattern = self._generate_search_pattern()
@@ -304,16 +261,13 @@ class SearchPortActionServer:
             self._abort("missing_tf_before_search")
             return
 
-        current_xyz = (
-            current_pose.pose.position.x,
-            current_pose.pose.position.y,
-            current_pose.pose.position.z,
-        )
         total_steps = len(pattern)
+        surface_point = reference_point
 
         for step_index, offset in enumerate(pattern, start=1):
             if self._server.is_preempt_requested():
                 self._robot.stop_motion()
+                self._micro_move_client.cancel_goal()
                 self._server.set_preempted(
                     self._make_result(False, False, "preempted", "preempted", "preempted")
                 )
@@ -325,108 +279,60 @@ class SearchPortActionServer:
                 self._abort("search_timeout")
                 return
 
-            current_xyz = (
-                current_xyz[0] + offset.dx * wall_tangent[0],
-                current_xyz[1] + offset.dx * wall_tangent[1],
-                current_xyz[2] + offset.dy,
+            surface_point = (
+                surface_point[0] + offset.dx * wall_tangent[0],
+                surface_point[1] + offset.dx * wall_tangent[1],
+                surface_point[2] + offset.dy,
             )
+            pre_probe_xyz = self._build_pre_probe_xyz(surface_point, probe_direction)
 
-            if self._search_fast_pre_probe_enabled:
-                target_lift_distance = max(
-                    self._search_lift_off_distance,
-                    self._search_fast_pre_probe_clearance,
-                )
-                self._publish_feedback(
-                    "search_fast_pre_probe",
-                    started_at,
-                    step_index,
-                    total_steps,
-                    reference_point,
-                    probe_direction,
-                )
-                move_success, move_error_code = self._move_to_xyz(
-                    self._build_offset_from_surface(current_xyz, probe_direction, target_lift_distance),
-                    self._search_fast_pre_probe_speed,
-                    self._search_traverse_tolerance,
-                    self._search_traverse_timeout,
-                )
-                if not move_success:
-                    self._abort("search_fast_pre_probe_failed", move_error_code)
-                    return
-            else:
-                self._publish_feedback(
-                    "search_lift_off",
-                    started_at,
-                    step_index,
-                    total_steps,
-                    reference_point,
-                    probe_direction,
-                )
-                move_success, move_error_code = self._move_along_direction(
-                    (-probe_direction[0], -probe_direction[1], -probe_direction[2]),
-                    self._search_lift_off_distance,
-                    self._search_lift_off_speed,
-                    self._search_traverse_timeout,
-                )
-                if not move_success:
-                    self._abort("search_lift_off_failed", move_error_code)
-                    return
+            self._publish_feedback(
+                "search_transfer_to_pre_probe",
+                started_at,
+                step_index,
+                total_steps,
+                surface_point,
+                probe_direction,
+            )
+            move_success, move_error_code = self._move_micro_to_xyz(pre_probe_xyz, probe_direction)
+            if not move_success:
+                self._abort("search_transfer_to_pre_probe_failed", move_error_code)
+                return
 
-                target_lift_distance = self._search_lift_off_distance
-                if self._search_diagonal_pre_probe_approach:
-                    target_lift_distance = self._search_lift_off_distance * (
-                        1.0 - self._search_pre_probe_approach_fraction
-                    )
+            self._publish_feedback(
+                "search_pre_probe_settle",
+                started_at,
+                step_index,
+                total_steps,
+                surface_point,
+                probe_direction,
+            )
+            if not self._sleep_interruptible(self._search_pre_probe_settle_time):
+                return
 
-                self._publish_feedback(
-                    "search_move",
-                    started_at,
-                    step_index,
-                    total_steps,
-                    reference_point,
-                    probe_direction,
-                )
-                move_success, move_error_code = self._move_to_xyz(
-                    self._build_offset_from_surface(current_xyz, probe_direction, target_lift_distance),
-                    self._search_traverse_speed,
-                    self._search_traverse_tolerance,
-                    self._search_traverse_timeout,
-                )
-                if not move_success:
-                    self._abort("search_motion_failed", move_error_code)
-                    return
-
-            if not self._search_fast_pre_probe_enabled and not self._search_diagonal_pre_probe_approach:
-                self._publish_feedback(
-                    "search_pre_probe_approach",
-                    started_at,
-                    step_index,
-                    total_steps,
-                    reference_point,
-                    probe_direction,
-                )
-                move_success, move_error_code = self._move_along_direction(
-                    probe_direction,
-                    self._search_lift_off_distance * self._search_pre_probe_approach_fraction,
-                    self._search_pre_probe_approach_speed,
-                    self._search_traverse_timeout,
-                )
-                if not move_success:
-                    self._abort("search_pre_probe_approach_failed", move_error_code)
-                    return
+            self._publish_feedback(
+                "search_force_baseline",
+                started_at,
+                step_index,
+                total_steps,
+                surface_point,
+                probe_direction,
+            )
+            if not self._capture_force_baseline(self._search_force_baseline_time):
+                return
 
             self._publish_feedback(
                 "search_probe",
                 started_at,
                 step_index,
                 total_steps,
-                reference_point,
+                surface_point,
                 probe_direction,
             )
             probe_success, probe_reason, inserted_depth, contact_force = self._probe_search_position(
-                reference_point,
+                surface_point,
                 probe_direction,
-                "raster",
+                "search",
                 step_index,
                 total_steps,
             )
@@ -439,12 +345,12 @@ class SearchPortActionServer:
                 started_at,
                 step_index,
                 total_steps,
-                reference_point,
+                surface_point,
                 probe_direction,
             )
             if probe_reason == "socket_depth_reached":
                 result = self._make_result(True, True, "potential_port_found", "", "")
-                result.wall_contact_point = probe_result.contact_point
+                result.wall_contact_point = wall_contact_point
                 result.found_pose = self._current_pose_or_empty()
                 result.inserted_depth = float(inserted_depth)
                 result.contact_force = float(contact_force)
@@ -453,118 +359,13 @@ class SearchPortActionServer:
                 return
 
         result = self._make_result(False, False, "search_pattern_exhausted", "search_pattern_exhausted", "")
-        result.wall_contact_point = probe_result.contact_point
+        result.wall_contact_point = wall_contact_point
         result.found_pose = self._current_pose_or_empty()
-        result.inserted_depth = float(self._compute_inserted_depth(reference_point, probe_direction))
-        result.contact_force = float(self._get_search_contact_force())
+        result.inserted_depth = float(self._compute_inserted_depth(surface_point, probe_direction))
+        result.contact_force = float(self._get_search_contact_force(probe_direction))
         result.completed_steps = total_steps
         self._robot.stop_motion()
         self._server.set_aborted(result)
-
-    def _execute_micro_pattern_preview(
-        self,
-        started_at: rospy.Time,
-        timeout: float,
-        wall_tangent,
-        probe_direction,
-    ) -> None:
-        try:
-            pattern = self._generate_search_pattern()
-        except ValueError as exc:
-            self._abort("search_pattern_invalid: %s" % exc, "search_pattern_invalid")
-            return
-
-        total_steps = len(pattern)
-        rospy.loginfo(
-            "[usb_c_insertion] event=micro_pattern_preview_start pattern=%s steps=%d "
-            "dwell_time=%.3f arc_enabled=%s arc_height=%.4f",
-            self._search_pattern,
-            total_steps,
-            self._micro_pattern_dwell_time,
-            self._micro_pattern_arc_enabled,
-            self._micro_pattern_arc_height,
-        )
-
-        for step_index, offset in enumerate(pattern, start=1):
-            if self._server.is_preempt_requested():
-                self._robot.stop_motion()
-                self._micro_move_client.cancel_goal()
-                self._server.set_preempted(
-                    self._make_result(False, False, "preempted", "preempted", "preempted")
-                )
-                return
-            if rospy.is_shutdown():
-                self._abort("shutdown_during_micro_pattern")
-                return
-            if (rospy.Time.now() - started_at).to_sec() > timeout:
-                self._abort("micro_pattern_timeout")
-                return
-
-            displacement = (
-                offset.dx * wall_tangent[0],
-                offset.dx * wall_tangent[1],
-                offset.dy,
-            )
-            if not self._move_micro_pattern_step(
-                started_at,
-                step_index,
-                total_steps,
-                displacement,
-                probe_direction,
-            ):
-                return
-
-            self._publish_feedback(
-                "micro_pattern_dwell",
-                started_at,
-                step_index,
-                total_steps,
-                None,
-                probe_direction,
-            )
-            if not self._sleep_interruptible(self._micro_pattern_dwell_time):
-                return
-
-        result = self._make_result(True, False, "micro_pattern_preview_complete", "", "")
-        result.found_pose = self._current_pose_or_empty()
-        result.completed_steps = total_steps
-        self._server.set_succeeded(result)
-
-    def _move_micro_pattern_step(
-        self,
-        started_at: rospy.Time,
-        step_index: int,
-        total_steps: int,
-        displacement,
-        probe_direction,
-    ) -> bool:
-        use_arc = self._micro_pattern_arc_enabled and self._micro_pattern_arc_height > 0.0
-        stage = "micro_pattern_arc_move" if use_arc else "micro_pattern_move"
-        arc_direction = None
-        arc_height = 0.0
-        if use_arc:
-            direction = self._normalize_vector(probe_direction)
-            arc_direction = (-direction[0], -direction[1], -direction[2])
-            arc_height = self._micro_pattern_arc_height
-
-        self._publish_feedback(
-            stage,
-            started_at,
-            step_index,
-            total_steps,
-            None,
-            probe_direction,
-        )
-        move_success, move_error_code = self._move_micro(
-            displacement,
-            self._search_traverse_timeout,
-            arc_direction=arc_direction,
-            arc_height=arc_height,
-        )
-        if not move_success:
-            self._abort("%s_failed" % stage, move_error_code)
-            return False
-        return True
 
     def _validate_pose_frame(self, pose: PoseStamped, error_code: str) -> bool:
         frame_id = pose.header.frame_id.strip() or self._base_frame
@@ -611,16 +412,6 @@ class SearchPortActionServer:
             )
         raise ValueError("unsupported search pattern '%s'" % self._search_pattern)
 
-    def _build_offset_from_surface(self, surface_xyz, probe_direction, lift_distance: float) -> Tuple[float, float, float]:
-        if lift_distance <= 0.0:
-            return surface_xyz
-        direction = self._normalize_vector(probe_direction)
-        return (
-            surface_xyz[0] - direction[0] * lift_distance,
-            surface_xyz[1] - direction[1] * lift_distance,
-            surface_xyz[2] - direction[2] * lift_distance,
-        )
-
     def _move_to_pose(self, target_xyz, target_quaternion, timeout: float) -> tuple[bool, str]:
         goal = MoveToPoseGoal()
         goal.target_pose = PoseStamped()
@@ -649,14 +440,50 @@ class SearchPortActionServer:
             return False, result.error_code or result.message
         return True, ""
 
+    def _build_pre_probe_xyz(self, surface_xyz, probe_direction) -> Tuple[float, float, float]:
+        direction = self._normalize_vector(probe_direction)
+        return (
+            surface_xyz[0] - direction[0] * self._search_pre_probe_clearance,
+            surface_xyz[1] - direction[1] * self._search_pre_probe_clearance,
+            surface_xyz[2] - direction[2] * self._search_pre_probe_clearance,
+        )
+
+    def _move_micro_to_xyz(self, target_xyz, probe_direction) -> tuple[bool, str]:
+        current_pose = self._tf.get_tool_pose_in_base()
+        if current_pose is None:
+            return False, "missing_tf"
+
+        current_xyz = (
+            current_pose.pose.position.x,
+            current_pose.pose.position.y,
+            current_pose.pose.position.z,
+        )
+        displacement = (
+            target_xyz[0] - current_xyz[0],
+            target_xyz[1] - current_xyz[1],
+            target_xyz[2] - current_xyz[2],
+        )
+        arc_direction = None
+        arc_height = 0.0
+        if self._search_transfer_arc_enabled and self._search_transfer_arc_height > 0.0:
+            direction = self._normalize_vector(probe_direction)
+            arc_direction = (-direction[0], -direction[1], -direction[2])
+            arc_height = self._search_transfer_arc_height
+        return self._move_micro(
+            displacement,
+            self._search_transfer_timeout,
+            arc_direction=arc_direction,
+            arc_height=arc_height,
+        )
+
     def _move_micro(self, displacement_xyz, timeout: float, arc_direction=None, arc_height: float = 0.0) -> tuple[bool, str]:
         goal = MicroMoveGoal()
         goal.displacement.x = float(displacement_xyz[0])
         goal.displacement.y = float(displacement_xyz[1])
         goal.displacement.z = float(displacement_xyz[2])
-        goal.max_velocity = float(self._micro_pattern_max_velocity)
-        goal.max_acceleration = float(self._micro_pattern_max_acceleration)
-        goal.max_jerk = float(self._micro_pattern_max_jerk)
+        goal.max_velocity = float(self._search_transfer_max_velocity)
+        goal.max_acceleration = float(self._search_transfer_max_acceleration)
+        goal.max_jerk = float(self._search_transfer_max_jerk)
         if arc_direction is not None:
             goal.arc_direction.x = float(arc_direction[0])
             goal.arc_direction.y = float(arc_direction[1])
@@ -692,147 +519,149 @@ class SearchPortActionServer:
                 return False
             rate.sleep()
         if rospy.is_shutdown():
-            self._abort("shutdown_during_micro_pattern_dwell")
+            self._abort("shutdown_during_search_wait")
             return False
         return True
 
-    def _move_to_xyz(
-        self,
-        target_xyz,
-        speed: float,
-        tolerance: float,
-        timeout: float,
-    ) -> tuple[bool, str]:
-        commanded_speed = max(0.0, float(speed))
-        if commanded_speed <= 0.0:
-            self._robot.stop_motion()
-            return False, "invalid_speed"
+    def _capture_force_baseline(self, duration: float) -> bool:
+        if not self._sleep_interruptible(duration):
+            return False
+        if self._ft.is_wrench_stale():
+            self._abort("stale_wrench_before_force_baseline")
+            return False
+        baseline = self._contact_detector.update_baseline()
+        rospy.loginfo(
+            "[usb_c_insertion] event=search_force_baseline_captured fx=%.3f fy=%.3f fz=%.3f",
+            baseline.force_x,
+            baseline.force_y,
+            baseline.force_z,
+        )
+        return True
 
-        deadline = rospy.Time.now() + rospy.Duration.from_sec(max(0.1, timeout))
-        allowed_error = max(0.00005, float(tolerance))
-        rate = rospy.Rate(max(1.0, float(rospy.get_param("~motion/command_rate", 500.0))))
+    def _begin_direct_probe_control(self) -> None:
+        self._robot.enable_pose_servo(False)
+        self._micro_motion_active_publisher.publish(Bool(data=True))
+        self._direct_probe_control_active = True
+        rospy.sleep(0.01)
 
-        while not rospy.is_shutdown():
-            if self._server.is_preempt_requested():
-                self._robot.stop_motion()
-                return False, "preempted"
-            if rospy.Time.now() > deadline:
-                self._robot.stop_motion()
-                return False, "move_to_xyz_timeout"
+    def _end_direct_probe_control(self) -> None:
+        self._publish_direct_zero_twist()
+        self._micro_motion_active_publisher.publish(Bool(data=False))
+        self._direct_probe_control_active = False
 
-            pose = self._tf.get_tool_pose_in_base()
-            if pose is None:
-                self._robot.stop_motion()
-                return False, "missing_tf"
+    def _publish_direct_twist(self, vx: float, vy: float, vz: float) -> None:
+        twist = Twist()
+        twist.linear.x = float(vx)
+        twist.linear.y = float(vy)
+        twist.linear.z = float(vz)
+        self._direct_twist_publisher.publish(self._to_controller_frame(twist))
 
-            current_xyz = (
-                pose.pose.position.x,
-                pose.pose.position.y,
-                pose.pose.position.z,
-            )
-            delta = (
-                target_xyz[0] - current_xyz[0],
-                target_xyz[1] - current_xyz[1],
-                target_xyz[2] - current_xyz[2],
-            )
-            distance = self._distance(current_xyz, target_xyz)
-            if distance <= allowed_error:
-                self._robot.stop_motion()
-                return True, ""
+    def _publish_direct_zero_twist(self) -> None:
+        zero_twist = self._to_controller_frame(Twist())
+        for index in range(max(1, self._search_direct_stop_repeat_count)):
+            self._direct_twist_publisher.publish(zero_twist)
+            if self._search_direct_stop_interval > 0.0 and index + 1 < self._search_direct_stop_repeat_count:
+                rospy.sleep(self._search_direct_stop_interval)
 
-            direction = tuple(component / distance for component in delta)
-            linear_speed = commanded_speed
-            if self._search_traverse_slowdown_distance > allowed_error:
-                speed_scale = self._clamp(
-                    (distance - allowed_error)
-                    / (self._search_traverse_slowdown_distance - allowed_error),
-                    0.0,
-                    1.0,
-                )
-                linear_speed = commanded_speed * speed_scale
-                linear_speed = max(self._search_traverse_min_speed, linear_speed)
-                linear_speed = min(commanded_speed, linear_speed)
-
-            self._robot.send_twist(
-                direction[0] * linear_speed,
-                direction[1] * linear_speed,
-                direction[2] * linear_speed,
-                0.0,
-                0.0,
-                0.0,
-            )
-            rate.sleep()
-
-        self._robot.stop_motion()
-        return False, "shutdown"
-
-    def _move_along_direction(
+    def _probe_until_contact(
         self,
         direction_xyz,
-        distance: float,
         speed: float,
+        max_travel: float,
         timeout: float,
-    ) -> tuple[bool, str]:
-        if distance <= 0.0:
-            return True, ""
-
+        probe_label: str,
+        step_index: int,
+        total_steps: int,
+    ) -> tuple[bool, str, Optional[Tuple[float, float, float]], float]:
+        deadline = rospy.Time.now() + rospy.Duration.from_sec(max(0.1, timeout))
+        rate = rospy.Rate(max(1.0, float(rospy.get_param("~motion/command_rate", 500.0))))
+        direction = self._normalize_vector(direction_xyz)
         start_pose = self._tf.get_tool_pose_in_base()
+        commanded_speed = max(0.0, float(speed))
         if start_pose is None:
             self._robot.stop_motion()
-            return False, "missing_initial_tf"
-
-        direction = self._normalize_vector(direction_xyz)
-        commanded_speed = max(0.0, float(speed))
+            return False, "missing_initial_tf", None, self._get_search_contact_force(direction)
         if commanded_speed <= 0.0:
             self._robot.stop_motion()
-            return False, "invalid_speed"
+            return False, "invalid_probe_speed", None, self._get_search_contact_force(direction)
 
         start_xyz = (
             start_pose.pose.position.x,
             start_pose.pose.position.y,
             start_pose.pose.position.z,
         )
-        deadline = rospy.Time.now() + rospy.Duration.from_sec(max(0.1, timeout))
-        rate = rospy.Rate(max(1.0, float(rospy.get_param("~motion/command_rate", 500.0))))
+        max_contact_force = self._get_search_contact_force(direction)
 
-        while not rospy.is_shutdown():
-            if self._server.is_preempt_requested():
-                self._robot.stop_motion()
-                return False, "preempted"
-            if rospy.Time.now() > deadline:
-                self._robot.stop_motion()
-                return False, "move_along_direction_timeout"
+        self._begin_direct_probe_control()
+        try:
+            while not rospy.is_shutdown():
+                if self._server.is_preempt_requested():
+                    self._publish_direct_zero_twist()
+                    return False, "preempted", None, max_contact_force
+                if rospy.Time.now() > deadline:
+                    self._publish_direct_zero_twist()
+                    return False, "initial_probe_timeout", None, max_contact_force
+                if self._ft.is_wrench_stale():
+                    self._publish_direct_zero_twist()
+                    return False, "stale_wrench", None, max_contact_force
 
-            pose = self._tf.get_tool_pose_in_base()
-            if pose is None:
-                self._robot.stop_motion()
-                return False, "missing_tf"
+                pose = self._tf.get_tool_pose_in_base()
+                if pose is None:
+                    self._publish_direct_zero_twist()
+                    return False, "missing_tf", None, max_contact_force
 
-            traveled = self._project_displacement(
-                start_xyz,
-                direction,
-                (
+                current_xyz = (
                     pose.pose.position.x,
                     pose.pose.position.y,
                     pose.pose.position.z,
-                ),
-            )
-            if traveled >= distance:
-                self._robot.stop_motion()
-                return True, ""
+                )
+                contact_force = self._get_search_contact_force(direction)
+                max_contact_force = max(max_contact_force, contact_force)
+                traveled = self._project_displacement(start_xyz, direction, current_xyz)
 
-            self._robot.send_twist(
-                direction[0] * commanded_speed,
-                direction[1] * commanded_speed,
-                direction[2] * commanded_speed,
-                0.0,
-                0.0,
-                0.0,
-            )
-            rate.sleep()
+                if contact_force >= self._search_contact_force_target:
+                    self._publish_direct_zero_twist()
+                    self._log_search_probe_result(
+                        probe_label,
+                        step_index,
+                        total_steps,
+                        True,
+                        "wall_contact_reached",
+                        0.0,
+                        traveled,
+                        contact_force,
+                        max_contact_force,
+                        current_xyz,
+                    )
+                    return True, "wall_contact_reached", current_xyz, contact_force
 
-        self._robot.stop_motion()
-        return False, "shutdown"
+                if traveled >= max_travel:
+                    self._publish_direct_zero_twist()
+                    self._log_search_probe_result(
+                        probe_label,
+                        step_index,
+                        total_steps,
+                        False,
+                        "initial_probe_max_travel_reached",
+                        0.0,
+                        traveled,
+                        contact_force,
+                        max_contact_force,
+                        current_xyz,
+                    )
+                    return False, "initial_probe_max_travel_reached", current_xyz, contact_force
+
+                self._publish_direct_twist(
+                    direction[0] * commanded_speed,
+                    direction[1] * commanded_speed,
+                    direction[2] * commanded_speed,
+                )
+                rate.sleep()
+
+            self._publish_direct_zero_twist()
+            return False, "shutdown", None, max_contact_force
+        finally:
+            self._end_direct_probe_control()
 
     def _probe_search_position(
         self,
@@ -869,67 +698,68 @@ class SearchPortActionServer:
         )
         max_contact_force = self._get_search_contact_force(direction)
 
-        while not rospy.is_shutdown():
-            if self._server.is_preempt_requested():
-                self._robot.stop_motion()
-                return self._finish_search_probe(probe_label, step_index, total_steps, False, "preempted", reference_point, direction, start_xyz, max_contact_force)
-            if rospy.Time.now() > deadline:
-                self._robot.stop_motion()
-                return self._finish_search_probe(probe_label, step_index, total_steps, False, "search_probe_timeout", reference_point, direction, start_xyz, max_contact_force)
-            if self._ft.is_wrench_stale():
-                self._robot.stop_motion()
-                return self._finish_search_probe(probe_label, step_index, total_steps, False, "stale_wrench", reference_point, direction, start_xyz, max_contact_force)
-            pose = self._tf.get_tool_pose_in_base()
-            if pose is None:
-                self._robot.stop_motion()
-                return self._finish_search_probe(probe_label, step_index, total_steps, False, "missing_tf", reference_point, direction, start_xyz, max_contact_force)
+        self._begin_direct_probe_control()
+        try:
+            while not rospy.is_shutdown():
+                if self._server.is_preempt_requested():
+                    self._publish_direct_zero_twist()
+                    return self._finish_search_probe(probe_label, step_index, total_steps, False, "preempted", reference_point, direction, start_xyz, max_contact_force)
+                if rospy.Time.now() > deadline:
+                    self._publish_direct_zero_twist()
+                    return self._finish_search_probe(probe_label, step_index, total_steps, False, "search_probe_timeout", reference_point, direction, start_xyz, max_contact_force)
+                if self._ft.is_wrench_stale():
+                    self._publish_direct_zero_twist()
+                    return self._finish_search_probe(probe_label, step_index, total_steps, False, "stale_wrench", reference_point, direction, start_xyz, max_contact_force)
+                pose = self._tf.get_tool_pose_in_base()
+                if pose is None:
+                    self._publish_direct_zero_twist()
+                    return self._finish_search_probe(probe_label, step_index, total_steps, False, "missing_tf", reference_point, direction, start_xyz, max_contact_force)
 
-            contact_force = self._get_search_contact_force(direction)
-            max_contact_force = max(max_contact_force, contact_force)
-            inserted_depth = self._compute_inserted_depth(reference_point, direction)
-            if contact_force >= self._search_contact_force_target:
-                self._robot.stop_motion()
-                return self._finish_search_probe(probe_label, step_index, total_steps, True, "wall_contact_reached", reference_point, direction, start_xyz, max_contact_force)
+                contact_force = self._get_search_contact_force(direction)
+                max_contact_force = max(max_contact_force, contact_force)
+                inserted_depth = self._compute_inserted_depth(reference_point, direction)
+                if contact_force >= self._search_contact_force_target:
+                    self._publish_direct_zero_twist()
+                    return self._finish_search_probe(probe_label, step_index, total_steps, True, "wall_contact_reached", reference_point, direction, start_xyz, max_contact_force)
 
-            if inserted_depth >= self._search_socket_depth_threshold:
-                self._robot.stop_motion()
-                return self._finish_search_probe(probe_label, step_index, total_steps, True, "socket_depth_reached", reference_point, direction, start_xyz, max_contact_force)
+                if inserted_depth >= self._search_socket_depth_threshold:
+                    self._publish_direct_zero_twist()
+                    return self._finish_search_probe(probe_label, step_index, total_steps, True, "socket_depth_reached", reference_point, direction, start_xyz, max_contact_force)
 
-            probe_travel = self._project_displacement(
-                start_xyz,
-                direction,
-                (
-                    pose.pose.position.x,
-                    pose.pose.position.y,
-                    pose.pose.position.z,
-                ),
-            )
-            if probe_travel >= self._search_probe_max_travel:
-                self._robot.stop_motion()
-                return self._finish_search_probe(
-                    probe_label,
-                    step_index,
-                    total_steps,
-                    False,
-                    "search_probe_max_travel_reached",
-                    reference_point,
-                    direction,
+                probe_travel = self._project_displacement(
                     start_xyz,
-                    max_contact_force,
+                    direction,
+                    (
+                        pose.pose.position.x,
+                        pose.pose.position.y,
+                        pose.pose.position.z,
+                    ),
                 )
+                if probe_travel >= self._search_probe_max_travel:
+                    self._publish_direct_zero_twist()
+                    return self._finish_search_probe(
+                        probe_label,
+                        step_index,
+                        total_steps,
+                        False,
+                        "search_probe_max_travel_reached",
+                        reference_point,
+                        direction,
+                        start_xyz,
+                        max_contact_force,
+                    )
 
-            self._robot.send_twist(
-                direction[0] * self._search_probe_speed,
-                direction[1] * self._search_probe_speed,
-                direction[2] * self._search_probe_speed,
-                0.0,
-                0.0,
-                0.0,
-            )
-            rate.sleep()
+                self._publish_direct_twist(
+                    direction[0] * self._search_probe_speed,
+                    direction[1] * self._search_probe_speed,
+                    direction[2] * self._search_probe_speed,
+                )
+                rate.sleep()
 
-        self._robot.stop_motion()
-        return self._finish_search_probe(probe_label, step_index, total_steps, False, "shutdown", reference_point, direction, start_xyz, max_contact_force)
+            self._publish_direct_zero_twist()
+            return self._finish_search_probe(probe_label, step_index, total_steps, False, "shutdown", reference_point, direction, start_xyz, max_contact_force)
+        finally:
+            self._end_direct_probe_control()
 
     def _finish_search_probe(
         self,
@@ -1041,10 +871,18 @@ class SearchPortActionServer:
         error_code: Optional[str] = None,
         failure_reason: Optional[str] = None,
     ) -> None:
+        if self._direct_probe_control_active:
+            self._end_direct_probe_control()
         self._robot.stop_motion()
         self._server.set_aborted(
             self._make_result(False, False, message, error_code or message, failure_reason or "")
         )
+
+    def _handle_shutdown(self) -> None:
+        if self._direct_probe_control_active:
+            self._end_direct_probe_control()
+        else:
+            self._publish_direct_zero_twist()
 
     def _current_pose_or_empty(self) -> PoseStamped:
         pose = self._tf.get_tool_pose_in_base()
@@ -1054,6 +892,15 @@ class SearchPortActionServer:
         empty.header.stamp = rospy.Time.now()
         empty.header.frame_id = self._base_frame
         return empty
+
+    def _make_point_stamped(self, xyz) -> PointStamped:
+        point = PointStamped()
+        point.header.stamp = rospy.Time.now()
+        point.header.frame_id = self._base_frame
+        point.point.x = float(xyz[0])
+        point.point.y = float(xyz[1])
+        point.point.z = float(xyz[2])
+        return point
 
     def _compute_inserted_depth(self, reference_point, direction_xyz) -> float:
         pose = self._tf.get_tool_pose_in_base()
@@ -1116,11 +963,6 @@ class SearchPortActionServer:
         return float(value) if float(value) > 0.0 else float(default)
 
     @staticmethod
-    def _dominant_axis_name(direction_xyz) -> str:
-        abs_components = {"x": abs(direction_xyz[0]), "y": abs(direction_xyz[1]), "z": abs(direction_xyz[2])}
-        return max(abs_components, key=abs_components.get)
-
-    @staticmethod
     def _normalize_vector(direction_xyz) -> Tuple[float, float, float]:
         magnitude = math.sqrt(sum(component * component for component in direction_xyz))
         if magnitude <= 1e-9:
@@ -1145,8 +987,15 @@ class SearchPortActionServer:
         return sum(delta[index] * direction_xyz[index] for index in range(3))
 
     @staticmethod
-    def _clamp(value: float, lower: float, upper: float) -> float:
-        return max(lower, min(upper, value))
+    def _to_controller_frame(twist: Twist) -> Twist:
+        converted = Twist()
+        converted.linear.x = -twist.linear.x
+        converted.linear.y = -twist.linear.y
+        converted.linear.z = twist.linear.z
+        converted.angular.x = -twist.angular.x
+        converted.angular.y = -twist.angular.y
+        converted.angular.z = twist.angular.z
+        return converted
 
 
 def main() -> None:

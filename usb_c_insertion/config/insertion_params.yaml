@@ -38,7 +38,7 @@ micro_motion:
   max_overshoot: 0.001
 
 contact:
-  baseline_window: 50
+  baseline_window: 10
   force_threshold_x: 2.0
   force_threshold_y: 2.0
   force_threshold_z: 2.0
@@ -55,45 +55,34 @@ probe:
 
 search:
   pattern: "spiral"
-  micro_pattern_preview_enabled: true
-  micro_pattern_dwell_time: 0.5
-  micro_pattern_max_velocity: 0.0
-  micro_pattern_max_acceleration: 0.0
-  micro_pattern_max_jerk: 0.0
-  micro_pattern_arc_enabled: true
-  micro_pattern_arc_height: 0.004
   step_y: 0.002
   step_z: 0.0015
   max_search_width: 0.015
   max_search_height: 0.015
   search_timeout: 70.0
-  traverse_timeout: 1.2
-  traverse_speed: 0.014
-  traverse_tolerance: 0.0005
-  traverse_slowdown_distance: 0.003
-  traverse_min_speed: 0.001
-  lift_off_distance: 0.0002
-  fast_pre_probe_enabled: true
-  fast_pre_probe_clearance: 0.003
-  fast_pre_probe_speed: 0.025
-  diagonal_pre_probe_approach: true
   preferred_tool_x_sign: -1.0
   preferred_z_sign: 1.0
   diagonal_first: true
-  pre_probe_approach_fraction: 0.9
-  lift_off_speed: 0.002
-  pre_probe_approach_speed: 0.001
+  transfer_timeout: 1.2
+  transfer_max_velocity: 0.0
+  transfer_max_acceleration: 0.0
+  transfer_max_jerk: 0.0
+  transfer_arc_enabled: true
+  transfer_arc_height: 0.004
+  pre_probe_clearance: 0.001
+  pre_probe_settle_time: 0.1
+  force_baseline_time: 0.05
   zero_ft_before_search: true
-  probe_speed: 0.01
+  initial_probe_speed: 0.010
+  initial_probe_max_travel: 0.06
+  initial_probe_timeout: 8.0
+  probe_speed: 0.006
   probe_timeout: 1.8
   probe_max_travel: 0.004
   contact_force_target: 2.0
-  contact_force_tolerance: 0.5
-  force_control_gain: 0.01
-  force_control_min_speed: 0.004
-  force_control_speed_limit: 0.01
-  force_control_timeout: 2.0
   socket_depth_threshold: 0.002
+  direct_stop_repeat_count: 10
+  direct_stop_interval: 0.001
 
 insert:
   insertion_depth: 0.01
