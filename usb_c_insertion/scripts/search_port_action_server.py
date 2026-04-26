@@ -98,6 +98,7 @@ class SearchPortActionServer:
                 rospy.get_param("~search/force_control_timeout", 2.0),
             )
         )
+        self._search_probe_max_travel = float(rospy.get_param("~search/probe_max_travel", 0.004))
         self._search_socket_depth_threshold = float(rospy.get_param("~search/socket_depth_threshold", 0.002))
         self._search_zero_ft_before_search = bool(
             rospy.get_param(
@@ -662,18 +663,18 @@ class SearchPortActionServer:
                 "missing_initial_tf",
                 0.0,
                 0.0,
-                self._get_search_contact_force(),
-                self._get_search_contact_force(),
+                self._get_search_contact_force(direction_xyz),
+                self._get_search_contact_force(direction_xyz),
                 None,
             )
-            return False, "missing_initial_tf", 0.0, self._get_search_contact_force()
+            return False, "missing_initial_tf", 0.0, self._get_search_contact_force(direction_xyz)
 
         start_xyz = (
             start_pose.pose.position.x,
             start_pose.pose.position.y,
             start_pose.pose.position.z,
         )
-        max_contact_force = self._get_search_contact_force()
+        max_contact_force = self._get_search_contact_force(direction)
 
         while not rospy.is_shutdown():
             if self._server.is_preempt_requested():
@@ -685,11 +686,12 @@ class SearchPortActionServer:
             if self._ft.is_wrench_stale():
                 self._robot.stop_motion()
                 return self._finish_search_probe(probe_label, step_index, total_steps, False, "stale_wrench", reference_point, direction, start_xyz, max_contact_force)
-            if self._tf.get_tool_pose_in_base() is None:
+            pose = self._tf.get_tool_pose_in_base()
+            if pose is None:
                 self._robot.stop_motion()
                 return self._finish_search_probe(probe_label, step_index, total_steps, False, "missing_tf", reference_point, direction, start_xyz, max_contact_force)
 
-            contact_force = self._get_search_contact_force()
+            contact_force = self._get_search_contact_force(direction)
             max_contact_force = max(max_contact_force, contact_force)
             inserted_depth = self._compute_inserted_depth(reference_point, direction)
             if contact_force >= self._search_contact_force_target:
@@ -699,6 +701,29 @@ class SearchPortActionServer:
             if inserted_depth >= self._search_socket_depth_threshold:
                 self._robot.stop_motion()
                 return self._finish_search_probe(probe_label, step_index, total_steps, True, "socket_depth_reached", reference_point, direction, start_xyz, max_contact_force)
+
+            probe_travel = self._project_displacement(
+                start_xyz,
+                direction,
+                (
+                    pose.pose.position.x,
+                    pose.pose.position.y,
+                    pose.pose.position.z,
+                ),
+            )
+            if probe_travel >= self._search_probe_max_travel:
+                self._robot.stop_motion()
+                return self._finish_search_probe(
+                    probe_label,
+                    step_index,
+                    total_steps,
+                    False,
+                    "search_probe_max_travel_reached",
+                    reference_point,
+                    direction,
+                    start_xyz,
+                    max_contact_force,
+                )
 
             self._robot.send_twist(
                 direction[0] * self._search_probe_speed,
@@ -726,7 +751,7 @@ class SearchPortActionServer:
         max_contact_force: float,
     ) -> tuple[bool, str, float, float]:
         final_pose = self._tf.get_tool_pose_in_base()
-        contact_force = self._get_search_contact_force()
+        contact_force = self._get_search_contact_force(direction)
         inserted_depth = self._compute_inserted_depth(reference_point, direction)
         travel_distance = 0.0
         final_xyz = None
@@ -810,9 +835,11 @@ class SearchPortActionServer:
         feedback.current_step = int(current_step)
         feedback.total_steps = int(total_steps)
         feedback.elapsed = float((rospy.Time.now() - started_at).to_sec())
-        feedback.contact_force = float(self._get_search_contact_force())
         if reference_point is not None and probe_direction is not None:
+            feedback.contact_force = float(self._get_search_contact_force(probe_direction))
             feedback.inserted_depth = float(self._compute_inserted_depth(reference_point, probe_direction))
+        else:
+            feedback.contact_force = float(self._get_search_contact_force())
         self._server.publish_feedback(feedback)
 
     def _abort(
@@ -847,7 +874,12 @@ class SearchPortActionServer:
         )
         return sum(displacement[index] * direction[index] for index in range(3))
 
-    def _get_search_contact_force(self) -> float:
+    def _get_search_contact_force(self, direction_xyz=None) -> float:
+        if direction_xyz is not None:
+            try:
+                return self._contact_detector.get_contact_force_along_direction(direction_xyz)
+            except ValueError:
+                pass
         wrench = self._ft.get_filtered_wrench()
         return max(0.0, -wrench.force_z)
 

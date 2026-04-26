@@ -68,6 +68,7 @@ search:
   zero_ft_before_search: true
   probe_speed: 0.01
   probe_timeout: 0.8
+  probe_max_travel: 0.004
   contact_force_target: 2.0
   contact_force_tolerance: 0.5
   force_control_gain: 0.01
@@ -120,8 +121,8 @@ state_machine:
   enabled: true
   auto_zero_ft: true
   log_debug: true
-  target_offset_tool_x: -0.014
-  target_offset_tool_y: -0.007
+  target_offset_tool_x: -0.013
+  target_offset_tool_y: -0.006
   prepose_offset: -0.01
   precontact_offset_tool_x: -0.000
   precontact_offset_tool_y: 0.000
