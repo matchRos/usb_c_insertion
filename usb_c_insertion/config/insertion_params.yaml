@@ -120,8 +120,8 @@ state_machine:
   enabled: true
   auto_zero_ft: true
   log_debug: true
-  target_offset_tool_x: -0.016
-  target_offset_tool_y: -0.009
+  target_offset_tool_x: -0.014
+  target_offset_tool_y: -0.007
   prepose_offset: -0.01
   precontact_offset_tool_x: -0.000
   precontact_offset_tool_y: 0.000
@@ -137,6 +137,7 @@ workflow:
   refine_camera_distance: 0.12
   refine_yaw_delta_sign: 1.0
   refine_yaw_max_delta_deg: 45.0
+  yaw_correction_use_current_position: true
   photo_pose_max_linear_speed: 0.12
   photo_pose_max_angular_speed: 0.35
   prepose_max_linear_speed: 0.10

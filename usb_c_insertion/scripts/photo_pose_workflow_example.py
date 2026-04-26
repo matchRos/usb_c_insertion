@@ -71,6 +71,9 @@ class PhotoPoseWorkflowExample:
         self._refine_camera_distance = float(rospy.get_param("~workflow/refine_camera_distance", 0.12))
         self._refine_yaw_delta_sign = float(rospy.get_param("~workflow/refine_yaw_delta_sign", 1.0))
         self._refine_yaw_max_delta_deg = float(rospy.get_param("~workflow/refine_yaw_max_delta_deg", 45.0))
+        self._yaw_correction_use_current_position = bool(
+            rospy.get_param("~workflow/yaw_correction_use_current_position", True)
+        )
 
         self._goal = self._load_goal_pose()
         self._tf = TFInterface()
@@ -119,7 +122,11 @@ class PhotoPoseWorkflowExample:
         if yaw_correction is None:
             return False
 
-        corrected_pose = self._apply_yaw_correction(pre_pose, yaw_correction)
+        yaw_reference_pose = self._build_yaw_correction_reference_pose(pre_pose)
+        if yaw_reference_pose is None:
+            return False
+
+        corrected_pose = self._apply_yaw_correction(yaw_reference_pose, yaw_correction)
         if corrected_pose is None:
             return False
 
@@ -447,6 +454,32 @@ class PhotoPoseWorkflowExample:
             str(bool(feedback.reached_position)).lower(),
             str(bool(feedback.reached_orientation)).lower(),
         )
+
+    def _build_yaw_correction_reference_pose(self, pre_pose: PoseStamped) -> PoseStamped | None:
+        reference_pose = PoseStamped()
+        reference_pose.header.stamp = rospy.Time.now()
+        reference_pose.header.frame_id = self._base_frame
+        reference_pose.pose.orientation = pre_pose.pose.orientation
+
+        if not self._yaw_correction_use_current_position:
+            reference_pose.pose.position = pre_pose.pose.position
+            return reference_pose
+
+        current_tool_pose = self._tf.get_tool_pose_in_base()
+        if current_tool_pose is None:
+            rospy.logerr(
+                "[usb_c_insertion] event=photo_pose_workflow_failed reason=yaw_correction_reference_pose_unavailable"
+            )
+            return None
+
+        reference_pose.pose.position = current_tool_pose.pose.position
+        rospy.loginfo(
+            "[usb_c_insertion] event=yaw_correction_reference_pose_selected source=current_tcp x=%.4f y=%.4f z=%.4f",
+            reference_pose.pose.position.x,
+            reference_pose.pose.position.y,
+            reference_pose.pose.position.z,
+        )
+        return reference_pose
 
     def _probe_surface(self, port_pose: PoseStamped) -> float | None:
         if not self._probe_client.wait_for_server(rospy.Duration.from_sec(5.0)):
