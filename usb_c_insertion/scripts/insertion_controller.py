@@ -45,19 +45,30 @@ class InsertionController:
         self._tf = tf_interface
         self._ft = ft_interface
 
-        self._command_rate = float(rospy.get_param("~motion/command_rate", 100.0))
+        self._command_rate = float(rospy.get_param("~motion/command_rate", 500.0))
         self._insertion_depth = float(rospy.get_param("~insert/insertion_depth", 0.004))
         self._contact_force_target = float(rospy.get_param("~insert/contact_force_target", 10.0))
         self._contact_force_tolerance = float(rospy.get_param("~insert/contact_force_tolerance", 1.0))
         self._force_control_gain = float(rospy.get_param("~insert/force_control_gain", 0.001))
         self._force_control_speed_limit = float(rospy.get_param("~insert/force_control_speed_limit", 0.003))
         self._force_control_timeout = float(rospy.get_param("~insert/force_control_timeout", 4.0))
+        self._force_target_oscillation_enabled = bool(
+            rospy.get_param("~insert/force_target_oscillation_enabled", False)
+        )
+        self._force_target_oscillation_frequency = max(
+            0.0,
+            float(rospy.get_param("~insert/force_target_oscillation_frequency", 1.0)),
+        )
+        self._force_target_min_ratio = max(
+            0.0,
+            min(1.0, float(rospy.get_param("~insert/force_target_min_ratio", 0.0))),
+        )
         self._min_insertion_time = float(rospy.get_param("~insert/min_insertion_time", 0.0))
         self._force_success_min_depth = float(rospy.get_param("~insert/force_success_min_depth", 0.0))
         self._wiggle_enabled = bool(rospy.get_param("~insert/wiggle_enabled", False))
         self._wiggle_speed_y = float(rospy.get_param("~insert/wiggle_speed_y", 0.0))
         self._wiggle_speed_x = float(rospy.get_param("~insert/wiggle_speed_x", 0.0))
-        self._wiggle_frequency = float(rospy.get_param("~insert/wiggle_frequency", 2.0))
+        self._wiggle_frequency = max(0.0, float(rospy.get_param("~insert/wiggle_frequency", 2.0)))
         self._release_force_threshold = float(rospy.get_param("~insert/release_force_threshold", 2.0))
 
     def insert_until_depth(
@@ -104,8 +115,9 @@ class InsertionController:
                 pose.pose.position.z,
             )
             contact_force = self._get_contact_force()
-            force_error = self._contact_force_target - contact_force
             elapsed = (rospy.Time.now() - start_time).to_sec()
+            dynamic_force_target = self._force_target_for_elapsed(elapsed)
+            force_error = dynamic_force_target - contact_force
             success_reason = self._success_reason(inserted_depth, contact_force, elapsed)
             if success_reason is not None:
                 self._robot.stop_motion()
@@ -128,7 +140,7 @@ class InsertionController:
                 )
 
             if abs(force_error) <= self._contact_force_tolerance:
-                speed = self._force_control_speed_limit
+                speed = 0.0
             else:
                 speed = self._force_control_gain * force_error
 
@@ -151,13 +163,15 @@ class InsertionController:
             )
             rospy.loginfo_throttle(
                 0.5,
-                "[usb_c_insertion] event=insert_progress inserted_depth=%.4f target_depth=%.4f contact_force=%.3f target_force=%.3f insert_speed=%.4f wiggle_enabled=%s",
+                "[usb_c_insertion] event=insert_progress inserted_depth=%.4f target_depth=%.4f contact_force=%.3f target_force=%.3f insert_speed=%.4f wiggle_enabled=%s wiggle_tool_y_speed=%.4f wiggle_tool_x_speed=%.4f",
                 inserted_depth,
                 self._insertion_depth,
                 contact_force,
-                self._contact_force_target,
+                dynamic_force_target,
                 bounded_speed,
                 str(self._wiggle_enabled).lower(),
+                self._wiggle_speed_y,
+                self._wiggle_speed_x,
             )
             rate.sleep()
 
@@ -226,6 +240,17 @@ class InsertionController:
             return "force_reached"
         return None
 
+    def _force_target_for_elapsed(self, elapsed: float) -> float:
+        if not self._force_target_oscillation_enabled:
+            return self._contact_force_target
+        if self._force_target_oscillation_frequency <= 0.0:
+            return self._contact_force_target
+
+        phase = 2.0 * math.pi * self._force_target_oscillation_frequency * elapsed
+        oscillation = 0.5 * (1.0 + math.cos(phase))
+        ratio = self._force_target_min_ratio + (1.0 - self._force_target_min_ratio) * oscillation
+        return self._contact_force_target * ratio
+
     def _compute_wiggle_velocity(
         self,
         start_time: rospy.Time,
@@ -233,6 +258,8 @@ class InsertionController:
         wiggle_x_direction: Optional[Tuple[float, float, float]],
     ) -> Tuple[float, float, float]:
         if not self._wiggle_enabled:
+            return (0.0, 0.0, 0.0)
+        if self._wiggle_frequency <= 0.0:
             return (0.0, 0.0, 0.0)
         if wiggle_y_direction is None and wiggle_x_direction is None:
             return (0.0, 0.0, 0.0)

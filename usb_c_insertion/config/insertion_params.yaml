@@ -71,12 +71,11 @@ search:
   transfer_arc_height: 0.004
   pre_probe_clearance: 0.001
   pre_probe_settle_time: 0.1
-  force_baseline_time: 0.05
   zero_ft_before_search: true
   initial_probe_speed: 0.010
   initial_probe_max_travel: 0.06
   initial_probe_timeout: 8.0
-  probe_speed: 0.006
+  probe_speed: 0.0045
   probe_timeout: 1.8
   probe_max_travel: 0.004
   contact_force_target: 1.0
@@ -95,12 +94,15 @@ insert:
   force_control_gain: 0.003
   force_control_speed_limit: 0.008
   force_control_timeout: 8.0
+  force_target_oscillation_enabled: true
+  force_target_oscillation_frequency: 1.0
+  force_target_min_ratio: 0.0
   min_insertion_time: 1.0
   force_success_min_depth: 0.006
   zero_ft_before_insert: false
   wiggle_enabled: true
-  wiggle_speed_y: 0.0005
-  wiggle_speed_x: 0.0
+  wiggle_speed_y: 0.001
+  wiggle_speed_x: 0.0002
   wiggle_frequency: 2.0
   release_force_threshold: 2.0
 
@@ -142,8 +144,8 @@ state_machine:
   enabled: true
   auto_zero_ft: true
   log_debug: true
-  target_offset_tool_x: -0.013
-  target_offset_tool_y: -0.005
+  target_offset_tool_x: -0.0195
+  target_offset_tool_y: -0.006
   prepose_offset: -0.01
   precontact_offset_tool_x: -0.000
   precontact_offset_tool_y: 0.000
@@ -156,7 +158,7 @@ workflow:
   refine_vision_enabled: true
   refine_vision_required: true
   refine_camera_frame: "zedm_left_camera_optical_frame"
-  refine_camera_distance: 0.19
+  refine_camera_distance: 0.18
   refine_yaw_delta_sign: 1.0
   refine_yaw_max_delta_deg: 45.0
   yaw_correction_use_current_position: true

@@ -84,7 +84,7 @@ class PhotoPoseWorkflowExample:
             rospy.get_param("~workflow/refine_camera_frame", "zedm_left_camera_optical_frame")
         ).strip()
         self._tool_frame = str(rospy.get_param("~frames/tool_frame", "tool0_controller")).strip()
-        self._refine_camera_distance = float(rospy.get_param("~workflow/refine_camera_distance", 0.12))
+        self._refine_camera_distance = float(rospy.get_param("~workflow/refine_camera_distance", 0.18))
         self._refine_yaw_delta_sign = float(rospy.get_param("~workflow/refine_yaw_delta_sign", 1.0))
         self._refine_yaw_max_delta_deg = float(rospy.get_param("~workflow/refine_yaw_max_delta_deg", 45.0))
         self._yaw_correction_use_current_position = bool(
@@ -111,6 +111,8 @@ class PhotoPoseWorkflowExample:
             self._verify_insertion_action_name,
             VerifyInsertionAction,
         )
+        self._last_search_feedback_stage = ""
+        self._last_search_feedback_log_time = rospy.Time(0)
 
     def run(self) -> bool:
         rospy.loginfo(
@@ -352,7 +354,7 @@ class PhotoPoseWorkflowExample:
             port_pose.pose.position.z - camera_z_axis[2] * self._refine_camera_distance,
         )
         plane_normal_yaw = math.atan2(port_x_axis[1], port_x_axis[0])
-        desired_tool_z_yaw = normalize_angle(-plane_normal_yaw + math.pi)
+        desired_tool_z_yaw = normalize_angle(plane_normal_yaw + math.pi)
         rospy.loginfo(
             "[usb_c_insertion] event=refined_camera_plane_orientation_z frame=%s plane_normal_yaw_deg=%.2f desired_tool_z_yaw_deg=%.2f plane_tangent_yaw_deg=%.2f port_x_axis=(%.4f,%.4f,%.4f) port_y_axis=(%.4f,%.4f,%.4f) port_q=(%.4f,%.4f,%.4f,%.4f)",
             self._base_frame,
@@ -753,9 +755,30 @@ class PhotoPoseWorkflowExample:
         )
 
     def _search_feedback_callback(self, feedback) -> None:
-        rospy.loginfo_throttle(
-            1.0,
-            "[usb_c_insertion] event=search_port_feedback stage=%s step=%d total=%d inserted_depth=%.4f contact_force=%.3f elapsed=%.2f",
+        noisy_stages = {
+            "search_transfer_to_pre_probe",
+            "search_pre_probe_settle",
+        }
+        if feedback.stage in noisy_stages:
+            return
+
+        now = rospy.Time.now()
+        milestone_stage = feedback.stage in {
+            "initial_surface_probe",
+            "initial_contact_verification",
+            "search_candidate_found",
+        }
+        progress_stage = feedback.stage == "search_probe_complete"
+        time_since_last_log = (now - self._last_search_feedback_log_time).to_sec()
+        if not milestone_stage and not progress_stage:
+            return
+        if not milestone_stage and time_since_last_log < 5.0:
+            return
+
+        self._last_search_feedback_stage = feedback.stage
+        self._last_search_feedback_log_time = now
+        rospy.loginfo(
+            "[usb_c_insertion] event=search_port_progress stage=%s step=%d total=%d inserted_depth=%.4f contact_force=%.3f elapsed=%.2f",
             feedback.stage,
             int(feedback.current_step),
             int(feedback.total_steps),
