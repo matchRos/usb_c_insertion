@@ -92,9 +92,11 @@ center_port:
   timeout: 100.0
   pixel_tolerance: 2.0
   stable_time: 0.35
-  command_rate: 20.0
-  gain: 0.00003
-  max_velocity: 0.006
+  command_rate: 40.0
+  gain: 0.0001
+  max_velocity: 0.012
+  max_acceleration: 0.03
+  output_smoothing_alpha: 0.2
   max_image_age: 0.5
   max_lost_time: 1.0
   min_blob_area: 120.0

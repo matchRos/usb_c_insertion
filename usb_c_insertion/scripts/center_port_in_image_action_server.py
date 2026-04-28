@@ -66,6 +66,11 @@ class CenterPortInImageActionServer:
         self._default_max_velocity = float(rospy.get_param("~center_port/max_velocity", 0.006))
         self._default_gain = float(rospy.get_param("~center_port/gain", 0.00002))
         self._default_min_blob_area = float(rospy.get_param("~center_port/min_blob_area", 120.0))
+        self._max_acceleration = max(0.0, float(rospy.get_param("~center_port/max_acceleration", 0.03)))
+        self._output_smoothing_alpha = max(
+            0.0,
+            min(1.0, float(rospy.get_param("~center_port/output_smoothing_alpha", 0.35))),
+        )
         self._max_image_age = float(rospy.get_param("~center_port/max_image_age", 0.5))
         self._max_lost_time = float(rospy.get_param("~center_port/max_lost_time", 1.0))
         self._image_to_tool_rotation_rad = math.radians(
@@ -129,13 +134,18 @@ class CenterPortInImageActionServer:
         centered_since: Optional[rospy.Time] = None
         last_seen = rospy.Time(0)
         latest_feedback_detection: Optional[PortDetection] = None
+        last_command_time = started_at
+        command_tool_x = 0.0
+        command_tool_y = 0.0
         rate = rospy.Rate(self._command_rate)
 
         rospy.loginfo(
-            "[usb_c_insertion] event=center_port_started image_topic=%s pixel_tolerance=%.1f max_velocity=%.4f gain=%.7f min_blob_area=%.1f",
+            "[usb_c_insertion] event=center_port_started image_topic=%s pixel_tolerance=%.1f max_velocity=%.4f max_acceleration=%.4f smoothing_alpha=%.2f gain=%.7f min_blob_area=%.1f",
             image_topic,
             pixel_tolerance,
             max_velocity,
+            self._max_acceleration,
+            self._output_smoothing_alpha,
             gain,
             min_blob_area,
         )
@@ -155,12 +165,16 @@ class CenterPortInImageActionServer:
             detection = self._get_latest_detection(min_blob_area)
             latest_feedback_detection = detection
             if detection is None:
+                command_tool_x = 0.0
+                command_tool_y = 0.0
                 self._robot.send_zero_twist()
                 self._publish_feedback("waiting_for_image", started_at, None, 0.0, 0.0)
                 rate.sleep()
                 continue
 
             if self._is_detection_stale(detection, now):
+                command_tool_x = 0.0
+                command_tool_y = 0.0
                 self._robot.send_zero_twist()
                 self._publish_feedback("image_stale", started_at, detection, 0.0, 0.0)
                 rate.sleep()
@@ -169,11 +183,22 @@ class CenterPortInImageActionServer:
             if detection.found:
                 last_seen = now
                 if detection.error_norm <= pixel_tolerance:
-                    self._robot.send_zero_twist()
+                    command_tool_x, command_tool_y = self._smooth_tool_velocity(
+                        command_tool_x,
+                        command_tool_y,
+                        0.0,
+                        0.0,
+                        self._command_dt(last_command_time, now),
+                    )
+                    last_command_time = now
+                    if not self._send_tool_xy_twist(command_tool_x, command_tool_y):
+                        self._abort("missing_tool_pose", detection, started_at)
+                        return
                     if centered_since is None:
                         centered_since = now
-                    self._publish_feedback("centered_settle", started_at, detection, 0.0, 0.0)
+                    self._publish_feedback("centered_settle", started_at, detection, command_tool_x, command_tool_y)
                     if (now - centered_since).to_sec() >= max(0.0, stable_time):
+                        self._robot.send_zero_twist()
                         self._server.set_succeeded(
                             self._make_result(True, "centered", "", detection, started_at)
                         )
@@ -188,11 +213,19 @@ class CenterPortInImageActionServer:
                     continue
 
                 centered_since = None
-                command_tool_x, command_tool_y = self._compute_tool_velocity(
+                desired_tool_x, desired_tool_y = self._compute_tool_velocity(
                     detection,
                     gain,
                     max_velocity,
                 )
+                command_tool_x, command_tool_y = self._smooth_tool_velocity(
+                    command_tool_x,
+                    command_tool_y,
+                    desired_tool_x,
+                    desired_tool_y,
+                    self._command_dt(last_command_time, now),
+                )
+                last_command_time = now
                 if not self._send_tool_xy_twist(command_tool_x, command_tool_y):
                     self._abort("missing_tool_pose", detection, started_at)
                     return
@@ -210,6 +243,8 @@ class CenterPortInImageActionServer:
                 rate.sleep()
                 continue
 
+            command_tool_x = 0.0
+            command_tool_y = 0.0
             self._robot.send_zero_twist()
             centered_since = None
             if last_seen != rospy.Time(0) and (now - last_seen).to_sec() > self._max_lost_time:
@@ -369,6 +404,34 @@ class CenterPortInImageActionServer:
             command_tool_x *= scale
             command_tool_y *= scale
         return command_tool_x, command_tool_y
+
+    def _smooth_tool_velocity(
+        self,
+        current_tool_x: float,
+        current_tool_y: float,
+        desired_tool_x: float,
+        desired_tool_y: float,
+        dt: float,
+    ) -> Tuple[float, float]:
+        alpha = self._output_smoothing_alpha
+        filtered_tool_x = current_tool_x + alpha * (desired_tool_x - current_tool_x)
+        filtered_tool_y = current_tool_y + alpha * (desired_tool_y - current_tool_y)
+
+        delta_x = filtered_tool_x - current_tool_x
+        delta_y = filtered_tool_y - current_tool_y
+        max_delta = self._max_acceleration * max(0.0, float(dt))
+        delta_norm = math.sqrt(delta_x * delta_x + delta_y * delta_y)
+        if delta_norm > max_delta > 0.0:
+            scale = max_delta / delta_norm
+            delta_x *= scale
+            delta_y *= scale
+        return current_tool_x + delta_x, current_tool_y + delta_y
+
+    def _command_dt(self, previous_time: rospy.Time, current_time: rospy.Time) -> float:
+        elapsed = (current_time - previous_time).to_sec()
+        if elapsed > 0.0:
+            return elapsed
+        return 1.0 / self._command_rate
 
     def _send_tool_xy_twist(self, command_tool_x: float, command_tool_y: float) -> bool:
         pose = self._tf.get_tool_pose_in_base()
