@@ -79,6 +79,7 @@ add_action_files(
   ProbeSurface.action
   SearchPort.action
   VerifyInsertion.action
+  VerifyLooming.action
 )
 
 ## Generate added messages and services with any dependencies listed here
@@ -192,8 +193,10 @@ catkin_install_python(PROGRAMS
   scripts/run_vision_service.py
   scripts/search_port_action_server.py
   scripts/send_center_port_goal.py
+  scripts/send_verify_looming_goal.py
   scripts/twist_controller_node.py
   scripts/verify_insertion_action_server.py
+  scripts/verify_looming_action_server.py
   scripts/vision_pose_publisher.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

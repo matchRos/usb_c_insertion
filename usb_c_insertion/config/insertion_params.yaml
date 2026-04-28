@@ -107,6 +107,24 @@ center_port:
   hsv_upper: [90, 255, 255]
   morph_kernel_size: 5
 
+looming:
+  action_name: "verify_looming"
+  image_topic: "/zedm/zed_node/left/image_rect_color"
+  travel_distance: 0.025
+  travel_speed: 0.006
+  timeout: 8.0
+  command_rate: 40.0
+  min_blob_area: 120.0
+  min_scale_ratio: 1.12
+  max_center_shift_px: 10.0
+  max_aspect_ratio_change: 0.35
+  tool_z_direction_sign: 1.0
+  max_image_age: 0.5
+  max_lost_time: 0.5
+  hsv_lower: [35, 70, 40]
+  hsv_upper: [90, 255, 255]
+  morph_kernel_size: 5
+
 insert:
   action_name: "insert_cable"
   insertion_depth: 0.01
