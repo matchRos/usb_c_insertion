@@ -1,0 +1,27 @@
+string image_topic
+string cloud_topic
+float32 estimate_timeout
+float32 yaw_tolerance_rad
+uint32 max_iterations
+float32 max_yaw_step_rad
+float32 settle_time
+float32 move_timeout
+---
+bool success
+string message
+string error_code
+uint32 iterations
+float32 initial_yaw_error_rad
+float32 final_yaw_error_rad
+float32 total_yaw_command_rad
+geometry_msgs/Vector3 final_normal_base
+geometry_msgs/PoseStamped final_pose
+---
+string stage
+uint32 iteration
+float32 yaw_error_rad
+float32 yaw_command_rad
+float32 total_yaw_command_rad
+geometry_msgs/Vector3 normal_base
+float32 inlier_ratio
+float32 rms_error

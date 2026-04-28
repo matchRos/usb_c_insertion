@@ -16,6 +16,12 @@
         args="0.05518032 -0.02546427 0.08955836 -0.00491662 0.00887975 0.70394300 0.71018394 tool0 zedm_left_camera_optical_frame 100"/>
 
     <node
+        pkg="tf"
+        type="static_transform_publisher"
+        name="usb_c_zed_camera_static_tf"
+        args="0.05518032 -0.02546427 0.08955836 -0.00491662 0.00887975 0.70394300 0.71018394 tool0 usb_c_zedm_left_camera_optical_frame 100"/>
+
+    <node
         name="usb_c_insertion_twist_controller"
         pkg="usb_c_insertion"
         type="twist_controller_node.py"

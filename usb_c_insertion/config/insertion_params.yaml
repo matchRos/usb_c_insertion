@@ -131,6 +131,8 @@ housing_plane:
   action_name: "estimate_housing_plane"
   image_topic: "/zedm/zed_node/left/image_rect_color"
   cloud_topic: "/zedm/zed_node/point_cloud/cloud_registered"
+  base_transform_frame: "usb_c_zedm_left_camera_optical_frame"
+  cloud_to_base_transform_rotation: "camera_frame_to_optical"
   timeout: 3.0
   command_rate: 20.0
   min_blob_area: 120.0
@@ -148,6 +150,21 @@ housing_plane:
   hsv_lower: [35, 70, 40]
   hsv_upper: [90, 255, 255]
   morph_kernel_size: 5
+
+align_housing_yaw:
+  action_name: "align_housing_yaw"
+  estimate_action_name: "estimate_housing_plane"
+  move_action_name: "move_to_pose"
+  image_topic: "/zedm/zed_node/left/image_rect_color"
+  cloud_topic: "/zedm/zed_node/point_cloud/cloud_registered"
+  estimate_timeout: 3.0
+  yaw_tolerance_rad: 0.01
+  max_iterations: 10
+  max_yaw_step_rad: 0.25
+  settle_time: 0.15
+  move_timeout: 20.0
+  tool_axis: [0.0, 0.0, 1.0]
+  target_axis_from_plane_normal_sign: -1.0
 
 insert:
   action_name: "insert_cable"

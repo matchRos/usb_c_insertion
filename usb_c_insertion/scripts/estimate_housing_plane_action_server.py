@@ -30,6 +30,8 @@ from usb_c_insertion.msg import (
     EstimateHousingPlaneResult,
 )
 
+CAMERA_FRAME_TO_OPTICAL_QUATERNION = (-0.5, 0.5, -0.5, -0.5)
+
 
 @dataclass(frozen=True)
 class GreenBlobDetection:
@@ -70,6 +72,12 @@ class EstimateHousingPlaneActionServer:
             rospy.get_param("~housing_plane/cloud_topic", "/zedm/zed_node/point_cloud/cloud_registered")
         ).strip()
         self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link")).strip()
+        self._base_transform_frame = str(
+            rospy.get_param("~housing_plane/base_transform_frame", "")
+        ).strip()
+        self._cloud_to_base_transform_rotation = str(
+            rospy.get_param("~housing_plane/cloud_to_base_transform_rotation", "identity")
+        ).strip().lower()
         self._command_rate = max(1.0, float(rospy.get_param("~housing_plane/command_rate", 20.0)))
         self._default_timeout = float(rospy.get_param("~housing_plane/timeout", 3.0))
         self._default_min_blob_area = float(rospy.get_param("~housing_plane/min_blob_area", 120.0))
@@ -113,10 +121,12 @@ class EstimateHousingPlaneActionServer:
         )
         self._server.start()
         rospy.loginfo(
-            "[usb_c_insertion] event=estimate_housing_plane_action_ready action=%s image_topic=%s cloud_topic=%s image_rotation_deg=%.1f",
+            "[usb_c_insertion] event=estimate_housing_plane_action_ready action=%s image_topic=%s cloud_topic=%s base_transform_frame=%s cloud_to_base_transform_rotation=%s image_rotation_deg=%.1f",
             self._action_name,
             self._image_topic,
             self._cloud_topic,
+            self._base_transform_frame or "<cloud_frame>",
+            self._cloud_to_base_transform_rotation,
             self._image_rotation_deg,
         )
 
@@ -210,8 +220,9 @@ class EstimateHousingPlaneActionServer:
             return
 
         estimate = self._orient_normal_toward_camera(estimate)
-        if cloud.header.frame_id.strip() != self._base_frame:
-            transform = self._tf.lookup_transform(self._base_frame, cloud.header.frame_id.strip())
+        base_lookup_frame = self._base_lookup_frame(cloud.header.frame_id)
+        if base_lookup_frame != self._base_frame:
+            transform = self._tf.lookup_transform(self._base_frame, base_lookup_frame)
             if transform is None:
                 self._abort(
                     "plane_base_tf_unavailable",
@@ -249,8 +260,10 @@ class EstimateHousingPlaneActionServer:
         )
         self._server.set_succeeded(result)
         rospy.loginfo(
-            "[usb_c_insertion] event=estimate_housing_plane_complete frame=%s inliers=%d filtered=%d ratio=%.3f rms_error=%.4f normal=(%.4f,%.4f,%.4f)",
+            "[usb_c_insertion] event=estimate_housing_plane_complete cloud_frame=%s base_transform_frame=%s base_frame=%s inliers=%d filtered=%d ratio=%.3f rms_error=%.4f normal_cloud=(%.4f,%.4f,%.4f) normal_base=(%.4f,%.4f,%.4f)",
             cloud.header.frame_id,
+            base_lookup_frame,
+            result.plane_point_base.header.frame_id,
             int(np.count_nonzero(estimate.inlier_mask)),
             filtered_points.shape[0],
             float(np.count_nonzero(estimate.inlier_mask)) / max(1.0, float(filtered_points.shape[0])),
@@ -258,6 +271,9 @@ class EstimateHousingPlaneActionServer:
             estimate.normal[0],
             estimate.normal[1],
             estimate.normal[2],
+            result.plane_normal_base.x,
+            result.plane_normal_base.y,
+            result.plane_normal_base.z,
         )
 
     def _wait_for_inputs(
@@ -676,18 +692,36 @@ class EstimateHousingPlaneActionServer:
         )
 
     def _transform_plane_to_base(self, frame_id: str, point: np.ndarray, normal: np.ndarray):
-        if frame_id.strip() == self._base_frame:
-            return point, normal
-        transform = self._tf.lookup_transform(self._base_frame, frame_id.strip())
+        source_frame = self._base_lookup_frame(frame_id)
+        point_for_tf, normal_for_tf = self._plane_in_base_lookup_frame(point, normal)
+        if source_frame == self._base_frame:
+            return point_for_tf, normal_for_tf
+        transform = self._tf.lookup_transform(self._base_frame, source_frame)
         if transform is None:
-            return point, normal
+            return point_for_tf, normal_for_tf
         rotation = transform.transform.rotation
         translation = transform.transform.translation
         normal_base = np.asarray(
-            rotate_vector_by_quaternion(normal[0], normal[1], normal[2], rotation.x, rotation.y, rotation.z, rotation.w),
+            rotate_vector_by_quaternion(
+                normal_for_tf[0],
+                normal_for_tf[1],
+                normal_for_tf[2],
+                rotation.x,
+                rotation.y,
+                rotation.z,
+                rotation.w,
+            ),
             dtype=np.float64,
         )
-        point_rotated = rotate_vector_by_quaternion(point[0], point[1], point[2], rotation.x, rotation.y, rotation.z, rotation.w)
+        point_rotated = rotate_vector_by_quaternion(
+            point_for_tf[0],
+            point_for_tf[1],
+            point_for_tf[2],
+            rotation.x,
+            rotation.y,
+            rotation.z,
+            rotation.w,
+        )
         point_base = np.asarray(
             (
                 point_rotated[0] + translation.x,
@@ -700,6 +734,39 @@ class EstimateHousingPlaneActionServer:
         if norm > 1e-9:
             normal_base = normal_base / norm
         return point_base, normal_base
+
+    def _base_lookup_frame(self, cloud_frame_id: str) -> str:
+        return self._base_transform_frame or cloud_frame_id.strip()
+
+    def _plane_in_base_lookup_frame(self, point: np.ndarray, normal: np.ndarray):
+        if not self._base_transform_frame:
+            return point, normal
+        if self._cloud_to_base_transform_rotation in ("", "identity", "none"):
+            return point, normal
+        if self._cloud_to_base_transform_rotation == "camera_frame_to_optical":
+            return self._rotate_plane(point, normal, CAMERA_FRAME_TO_OPTICAL_QUATERNION)
+        rospy.logwarn_throttle(
+            2.0,
+            "[usb_c_insertion] event=estimate_housing_plane_unknown_cloud_rotation mode=%s",
+            self._cloud_to_base_transform_rotation,
+        )
+        return point, normal
+
+    @staticmethod
+    def _rotate_plane(point: np.ndarray, normal: np.ndarray, quaternion_xyzw):
+        qx, qy, qz, qw = quaternion_xyzw
+        rotated_point = np.asarray(
+            rotate_vector_by_quaternion(point[0], point[1], point[2], qx, qy, qz, qw),
+            dtype=np.float64,
+        )
+        rotated_normal = np.asarray(
+            rotate_vector_by_quaternion(normal[0], normal[1], normal[2], qx, qy, qz, qw),
+            dtype=np.float64,
+        )
+        norm = float(np.linalg.norm(rotated_normal))
+        if norm > 1e-9:
+            rotated_normal = rotated_normal / norm
+        return rotated_point, rotated_normal
 
     @staticmethod
     def _point_stamped(frame_id: str, point: np.ndarray) -> PointStamped:

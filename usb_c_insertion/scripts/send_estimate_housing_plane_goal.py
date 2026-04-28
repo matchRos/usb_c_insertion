@@ -35,9 +35,11 @@ class EstimateHousingPlaneGoalClient:
 
         goal = self._build_goal()
         rospy.loginfo(
-            "[usb_c_insertion] event=estimate_housing_plane_goal_send image_topic=%s cloud_topic=%s roi_radius_px=%d roi_stride_px=%d ransac_iterations=%d use_svd_refit=%s",
+            "[usb_c_insertion] event=estimate_housing_plane_goal_send image_topic=%s cloud_topic=%s base_transform_frame=%s cloud_to_base_transform_rotation=%s roi_radius_px=%d roi_stride_px=%d ransac_iterations=%d use_svd_refit=%s",
             goal.image_topic,
             goal.cloud_topic,
+            str(rospy.get_param("~housing_plane/base_transform_frame", "")).strip() or "<cloud_frame>",
+            str(rospy.get_param("~housing_plane/cloud_to_base_transform_rotation", "identity")).strip(),
             int(goal.roi_radius_px),
             int(goal.roi_stride_px),
             int(goal.ransac_iterations),
@@ -58,14 +60,19 @@ class EstimateHousingPlaneGoalClient:
 
         log_fn = rospy.loginfo if result.success else rospy.logerr
         log_fn(
-            "[usb_c_insertion] event=estimate_housing_plane_goal_result success=%s message=%s error_code=%s inliers=%d filtered=%d ratio=%.3f rms=%.4f normal_base=(%.4f,%.4f,%.4f) point_base=(%.4f,%.4f,%.4f) elapsed=%.2f",
+            "[usb_c_insertion] event=estimate_housing_plane_goal_result success=%s message=%s error_code=%s cloud_frame=%s base_frame=%s inliers=%d filtered=%d ratio=%.3f rms=%.4f normal_cloud=(%.4f,%.4f,%.4f) normal_base=(%.4f,%.4f,%.4f) point_base=(%.4f,%.4f,%.4f) elapsed=%.2f",
             str(bool(result.success)).lower(),
             result.message,
             result.error_code,
+            result.plane_point.header.frame_id,
+            result.plane_point_base.header.frame_id,
             int(result.inlier_count),
             int(result.filtered_point_count),
             float(result.inlier_ratio),
             float(result.rms_error),
+            float(result.plane_normal.x),
+            float(result.plane_normal.y),
+            float(result.plane_normal.z),
             float(result.plane_normal_base.x),
             float(result.plane_normal_base.y),
             float(result.plane_normal_base.z),

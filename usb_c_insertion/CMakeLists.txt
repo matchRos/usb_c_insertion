@@ -71,6 +71,7 @@ add_service_files(
 ## Generate actions in the 'action' folder
 add_action_files(
   FILES
+  AlignHousingYaw.action
   ApplyYawCorrection.action
   CenterPortInImage.action
   EstimateHousingPlane.action
@@ -179,6 +180,7 @@ include_directories(
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
 catkin_install_python(PROGRAMS
+  scripts/align_housing_yaw_action_server.py
   scripts/apply_yaw_correction_action_server.py
   scripts/camera_pose_publisher.py
   scripts/center_port_in_image_action_server.py
@@ -195,6 +197,7 @@ catkin_install_python(PROGRAMS
   scripts/run_vision_service.py
   scripts/search_port_action_server.py
   scripts/send_center_port_goal.py
+  scripts/send_align_housing_yaw_goal.py
   scripts/send_estimate_housing_plane_goal.py
   scripts/send_verify_looming_goal.py
   scripts/twist_controller_node.py
