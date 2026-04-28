@@ -93,6 +93,7 @@ class EstimateHousingPlaneActionServer:
         self._default_use_largest_component = bool(
             rospy.get_param("~housing_plane/use_largest_component", True)
         )
+        self._marker_ray_window_px = max(0, int(rospy.get_param("~housing_plane/marker_ray_window_px", 2)))
         self._max_image_age = float(rospy.get_param("~housing_plane/max_image_age", 0.5))
         self._max_cloud_age = float(rospy.get_param("~housing_plane/max_cloud_age", 0.5))
         self._image_rotation_deg = self._normalize_image_rotation_deg(
@@ -220,6 +221,7 @@ class EstimateHousingPlaneActionServer:
             return
 
         estimate = self._orient_normal_toward_camera(estimate)
+        marker_plane_point = self._estimate_marker_plane_point(cloud, raw_u, raw_v, estimate)
         base_lookup_frame = self._base_lookup_frame(cloud.header.frame_id)
         if base_lookup_frame != self._base_frame:
             transform = self._tf.lookup_transform(self._base_frame, base_lookup_frame)
@@ -247,6 +249,7 @@ class EstimateHousingPlaneActionServer:
             roi_point_count,
             filtered_points.shape[0],
             estimate,
+            marker_plane_point,
         )
         self._publish_feedback(
             "complete",
@@ -585,6 +588,49 @@ class EstimateHousingPlaneActionServer:
             normal = normal / norm
         return centroid, normal
 
+    def _estimate_marker_plane_point(
+        self,
+        cloud: PointCloud2,
+        raw_u: float,
+        raw_v: float,
+        estimate: PlaneEstimate,
+    ) -> Optional[np.ndarray]:
+        ray_point = self._read_marker_ray_point(cloud, raw_u, raw_v)
+        if ray_point is None:
+            return None
+        ray_norm = float(np.linalg.norm(ray_point))
+        if ray_norm <= 1e-9:
+            return None
+        direction = ray_point / ray_norm
+        denominator = float(np.dot(estimate.normal, direction))
+        if abs(denominator) <= 1e-7:
+            return None
+        distance_along_ray = float(np.dot(estimate.normal, estimate.point) / denominator)
+        if distance_along_ray <= 0.0:
+            return None
+        return direction * distance_along_ray
+
+    def _read_marker_ray_point(self, cloud: PointCloud2, raw_u: float, raw_v: float) -> Optional[np.ndarray]:
+        center_u = int(round(raw_u))
+        center_v = int(round(raw_v))
+        radius = max(0, int(self._marker_ray_window_px))
+        u_min = max(0, center_u - radius)
+        u_max = min(int(cloud.width) - 1, center_u + radius)
+        v_min = max(0, center_v - radius)
+        v_max = min(int(cloud.height) - 1, center_v + radius)
+        uvs = [(u, v) for v in range(v_min, v_max + 1) for u in range(u_min, u_max + 1)]
+        points = []
+        for point in point_cloud2.read_points(cloud, field_names=("x", "y", "z"), skip_nans=False, uvs=uvs):
+            x, y, z = point[:3]
+            if not np.isfinite(x) or not np.isfinite(y) or not np.isfinite(z):
+                continue
+            if abs(x) <= 1e-9 and abs(y) <= 1e-9 and abs(z) <= 1e-9:
+                continue
+            points.append((float(x), float(y), float(z)))
+        if not points:
+            return None
+        return np.median(np.asarray(points, dtype=np.float64), axis=0)
+
     @staticmethod
     def _orient_normal_toward_camera(estimate: PlaneEstimate) -> PlaneEstimate:
         normal = estimate.normal
@@ -638,6 +684,7 @@ class EstimateHousingPlaneActionServer:
         roi_point_count: int = 0,
         filtered_point_count: int = 0,
         estimate: Optional[PlaneEstimate] = None,
+        marker_plane_point: Optional[np.ndarray] = None,
     ) -> EstimateHousingPlaneResult:
         result = EstimateHousingPlaneResult()
         result.success = bool(success)
@@ -662,6 +709,10 @@ class EstimateHousingPlaneActionServer:
             base_point, base_normal = self._transform_plane_to_base(cloud.header.frame_id, estimate.point, estimate.normal)
             result.plane_point_base = self._point_stamped(self._base_frame, base_point)
             result.plane_normal_base = self._vector3(base_normal)
+            marker_point = marker_plane_point if marker_plane_point is not None else estimate.point
+            marker_base_point, _ = self._transform_plane_to_base(cloud.header.frame_id, marker_point, estimate.normal)
+            result.marker_plane_point = self._point_stamped(cloud.header.frame_id, marker_point)
+            result.marker_plane_point_base = self._point_stamped(self._base_frame, marker_base_point)
         return result
 
     def _abort(

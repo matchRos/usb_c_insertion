@@ -144,6 +144,7 @@ housing_plane:
   min_inliers: 120
   use_svd_refit: true
   use_largest_component: true
+  marker_ray_window_px: 2
   max_image_age: 0.5
   max_cloud_age: 0.5
   image_rotation_deg: 180.0
@@ -237,11 +238,14 @@ state_machine:
 workflow:
   refine_vision_enabled: true
   refine_vision_required: true
-  refine_camera_frame: "zedm_left_camera_optical_frame"
+  refine_camera_frame: "usb_c_zedm_left_camera_optical_frame"
   refine_camera_distance: 0.18
   refine_yaw_delta_sign: 1.0
   refine_yaw_max_delta_deg: 45.0
   yaw_correction_use_current_position: true
+  updated_port_pose_topic: "/usb_c_insertion/updated_port_pose"
+  min_plane_inlier_ratio: 0.80
+  max_plane_rms_error: 0.004
   photo_pose_max_linear_speed: 0.12
   photo_pose_max_angular_speed: 0.35
   prepose_max_linear_speed: 0.10

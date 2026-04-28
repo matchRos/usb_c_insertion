@@ -192,6 +192,8 @@ catkin_install_python(PROGRAMS
   scripts/move_to_pose_action_server.py
   scripts/micro_move_action_server.py
   scripts/photo_pose_workflow_example.py
+  scripts/preinsert_alignment_workflow.py
+  scripts/preinsert_workflow_helpers.py
   scripts/pose_servo_node.py
   scripts/probe_surface_action_server.py
   scripts/run_vision_service.py

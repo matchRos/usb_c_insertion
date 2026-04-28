@@ -60,7 +60,7 @@ class EstimateHousingPlaneGoalClient:
 
         log_fn = rospy.loginfo if result.success else rospy.logerr
         log_fn(
-            "[usb_c_insertion] event=estimate_housing_plane_goal_result success=%s message=%s error_code=%s cloud_frame=%s base_frame=%s inliers=%d filtered=%d ratio=%.3f rms=%.4f normal_cloud=(%.4f,%.4f,%.4f) normal_base=(%.4f,%.4f,%.4f) point_base=(%.4f,%.4f,%.4f) elapsed=%.2f",
+            "[usb_c_insertion] event=estimate_housing_plane_goal_result success=%s message=%s error_code=%s cloud_frame=%s base_frame=%s inliers=%d filtered=%d ratio=%.3f rms=%.4f normal_cloud=(%.4f,%.4f,%.4f) normal_base=(%.4f,%.4f,%.4f) point_base=(%.4f,%.4f,%.4f) marker_point_base=(%.4f,%.4f,%.4f) elapsed=%.2f",
             str(bool(result.success)).lower(),
             result.message,
             result.error_code,
@@ -79,6 +79,9 @@ class EstimateHousingPlaneGoalClient:
             float(result.plane_point_base.point.x),
             float(result.plane_point_base.point.y),
             float(result.plane_point_base.point.z),
+            float(result.marker_plane_point_base.point.x),
+            float(result.marker_plane_point_base.point.y),
+            float(result.marker_plane_point_base.point.z),
             float(result.elapsed),
         )
         return bool(result.success)

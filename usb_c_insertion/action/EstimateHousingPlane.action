@@ -18,6 +18,8 @@ geometry_msgs/PointStamped plane_point
 geometry_msgs/Vector3 plane_normal
 geometry_msgs/PointStamped plane_point_base
 geometry_msgs/Vector3 plane_normal_base
+geometry_msgs/PointStamped marker_plane_point
+geometry_msgs/PointStamped marker_plane_point_base
 float32 marker_center_x
 float32 marker_center_y
 float32 raw_center_u
