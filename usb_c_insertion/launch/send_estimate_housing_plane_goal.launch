@@ -1,0 +1,13 @@
+<launch>
+  <arg name="image_topic" default="/zedm/zed_node/left/image_rect_color" />
+  <arg name="cloud_topic" default="/zedm/zed_node/point_cloud/cloud_registered" />
+
+  <node pkg="usb_c_insertion"
+        type="send_estimate_housing_plane_goal.py"
+        name="usb_c_insertion_estimate_housing_plane_goal_client"
+        output="screen">
+    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+    <param name="housing_plane/image_topic" value="$(arg image_topic)" />
+    <param name="housing_plane/cloud_topic" value="$(arg cloud_topic)" />
+  </node>
+</launch>

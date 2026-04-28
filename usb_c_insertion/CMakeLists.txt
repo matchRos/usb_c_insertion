@@ -73,6 +73,7 @@ add_action_files(
   FILES
   ApplyYawCorrection.action
   CenterPortInImage.action
+  EstimateHousingPlane.action
   InsertCable.action
   MicroMove.action
   MoveToPose.action
@@ -182,6 +183,7 @@ catkin_install_python(PROGRAMS
   scripts/camera_pose_publisher.py
   scripts/center_port_in_image_action_server.py
   scripts/compute_prepose_service.py
+  scripts/estimate_housing_plane_action_server.py
   scripts/extract_cable.py
   scripts/insertion_state_machine.py
   scripts/insert_cable_action_server.py
@@ -193,6 +195,7 @@ catkin_install_python(PROGRAMS
   scripts/run_vision_service.py
   scripts/search_port_action_server.py
   scripts/send_center_port_goal.py
+  scripts/send_estimate_housing_plane_goal.py
   scripts/send_verify_looming_goal.py
   scripts/twist_controller_node.py
   scripts/verify_insertion_action_server.py

@@ -127,6 +127,28 @@ looming:
   hsv_upper: [90, 255, 255]
   morph_kernel_size: 5
 
+housing_plane:
+  action_name: "estimate_housing_plane"
+  image_topic: "/zedm/zed_node/left/image_rect_color"
+  cloud_topic: "/zedm/zed_node/point_cloud/cloud_registered"
+  timeout: 3.0
+  command_rate: 20.0
+  min_blob_area: 120.0
+  roi_radius_px: 70
+  roi_stride_px: 2
+  depth_window_m: 0.06
+  ransac_iterations: 120
+  ransac_distance_threshold: 0.004
+  min_inliers: 120
+  use_svd_refit: true
+  use_largest_component: true
+  max_image_age: 0.5
+  max_cloud_age: 0.5
+  image_rotation_deg: 180.0
+  hsv_lower: [35, 70, 40]
+  hsv_upper: [90, 255, 255]
+  morph_kernel_size: 5
+
 insert:
   action_name: "insert_cable"
   insertion_depth: 0.01
