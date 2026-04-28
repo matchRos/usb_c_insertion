@@ -75,16 +75,35 @@ search:
   initial_probe_speed: 0.010
   initial_probe_max_travel: 0.06
   initial_probe_timeout: 8.0
-  probe_speed: 0.0045
+  probe_speed: 0.006
   probe_timeout: 1.8
   probe_max_travel: 0.004
   contact_force_target: 1.0
-  socket_depth_threshold: 0.0023
+  socket_depth_threshold: 0.0020
   verify_initial_contact: true
-  verification_required: true
+  verification_required: false
   verify_timeout: 2.0
   direct_stop_repeat_count: 10
   direct_stop_interval: 0.001
+
+center_port:
+  action_name: "center_port_in_image"
+  image_topic: "/zedm/zed_node/left/image_rect_color"
+  timeout: 100.0
+  pixel_tolerance: 2.0
+  stable_time: 0.35
+  command_rate: 20.0
+  gain: 0.00003
+  max_velocity: 0.006
+  max_image_age: 0.5
+  max_lost_time: 1.0
+  min_blob_area: 120.0
+  image_to_tool_rotation_deg: -90.0
+  image_error_to_tool_x_sign: -1.0
+  image_error_to_tool_y_sign: -1.0
+  hsv_lower: [35, 70, 40]
+  hsv_upper: [90, 255, 255]
+  morph_kernel_size: 5
 
 insert:
   action_name: "insert_cable"

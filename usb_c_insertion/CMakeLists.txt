@@ -72,6 +72,7 @@ add_service_files(
 add_action_files(
   FILES
   ApplyYawCorrection.action
+  CenterPortInImage.action
   InsertCable.action
   MicroMove.action
   MoveToPose.action
@@ -178,6 +179,7 @@ include_directories(
 catkin_install_python(PROGRAMS
   scripts/apply_yaw_correction_action_server.py
   scripts/camera_pose_publisher.py
+  scripts/center_port_in_image_action_server.py
   scripts/compute_prepose_service.py
   scripts/extract_cable.py
   scripts/insertion_state_machine.py
@@ -189,6 +191,7 @@ catkin_install_python(PROGRAMS
   scripts/probe_surface_action_server.py
   scripts/run_vision_service.py
   scripts/search_port_action_server.py
+  scripts/send_center_port_goal.py
   scripts/twist_controller_node.py
   scripts/verify_insertion_action_server.py
   scripts/vision_pose_publisher.py

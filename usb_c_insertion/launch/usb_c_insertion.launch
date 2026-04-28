@@ -15,6 +15,16 @@
 
   <node unless="$(arg publish_vision_pose_only)"
         pkg="usb_c_insertion"
+        type="center_port_in_image_action_server.py"
+        name="usb_c_insertion_center_port_in_image_action_server"
+        output="screen">
+    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+  </node>
+
+  <node unless="$(arg publish_vision_pose_only)"
+        pkg="usb_c_insertion"
         type="move_to_pose_action_server.py"
         name="usb_c_insertion_move_to_pose_action_server"
         output="screen">

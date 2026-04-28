@@ -1,0 +1,34 @@
+string image_topic
+float32 timeout
+float32 pixel_tolerance
+float32 stable_time
+float32 max_velocity
+float32 gain
+float32 min_blob_area
+---
+bool success
+string message
+string error_code
+geometry_msgs/PoseStamped final_pose
+float32 blob_center_x
+float32 blob_center_y
+float32 blob_area
+float32 error_x
+float32 error_y
+float32 error_norm
+uint32 image_width
+uint32 image_height
+float32 elapsed
+---
+string stage
+float32 elapsed
+float32 blob_center_x
+float32 blob_center_y
+float32 blob_area
+float32 error_x
+float32 error_y
+float32 error_norm
+uint32 image_width
+uint32 image_height
+float32 command_tool_x
+float32 command_tool_y
