@@ -73,6 +73,9 @@ class CenterPortInImageActionServer:
         )
         self._max_image_age = float(rospy.get_param("~center_port/max_image_age", 0.5))
         self._max_lost_time = float(rospy.get_param("~center_port/max_lost_time", 1.0))
+        self._image_rotation_deg = self._normalize_image_rotation_deg(
+            float(rospy.get_param("~center_port/image_rotation_deg", 0.0))
+        )
         self._image_to_tool_rotation_rad = math.radians(
             float(rospy.get_param("~center_port/image_to_tool_rotation_deg", 0.0))
         )
@@ -106,9 +109,10 @@ class CenterPortInImageActionServer:
         rospy.on_shutdown(self._handle_shutdown)
         self._server.start()
         rospy.loginfo(
-            "[usb_c_insertion] event=center_port_in_image_action_ready action=%s image_topic=%s image_to_tool_rotation_deg=%.1f image_error_to_tool_x_sign=%.1f image_error_to_tool_y_sign=%.1f",
+            "[usb_c_insertion] event=center_port_in_image_action_ready action=%s image_topic=%s image_rotation_deg=%.1f image_to_tool_rotation_deg=%.1f image_error_to_tool_x_sign=%.1f image_error_to_tool_y_sign=%.1f",
             self._action_name,
             self._image_topic,
+            self._image_rotation_deg,
             math.degrees(self._image_to_tool_rotation_rad),
             self._image_error_to_tool_x_sign,
             self._image_error_to_tool_y_sign,
@@ -283,7 +287,7 @@ class CenterPortInImageActionServer:
             self._latest_detection = detection
 
     def _detect_green_blob(self, msg: Image) -> PortDetection:
-        bgr = self._image_to_bgr(msg)
+        bgr = self._rotate_image_for_processing(self._image_to_bgr(msg))
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(
             hsv,
@@ -369,6 +373,15 @@ class CenterPortInImageActionServer:
         if encoding == "bgra8":
             return cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
         return cv2.cvtColor(image, cv2.COLOR_RGBA2BGR)
+
+    def _rotate_image_for_processing(self, bgr: np.ndarray) -> np.ndarray:
+        if self._image_rotation_deg == 0.0:
+            return bgr
+        if self._image_rotation_deg == 90.0:
+            return cv2.rotate(bgr, cv2.ROTATE_90_CLOCKWISE)
+        if self._image_rotation_deg == 180.0:
+            return cv2.rotate(bgr, cv2.ROTATE_180)
+        return cv2.rotate(bgr, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
     def _get_latest_detection(self, min_blob_area: float) -> Optional[PortDetection]:
         with self._lock:
@@ -545,6 +558,19 @@ class CenterPortInImageActionServer:
             rospy.logwarn("[usb_c_insertion] event=center_port_invalid_hsv_param param=%s", param_name)
             value = default_value
         return tuple(max(0, min(255, int(component))) for component in value)
+
+    @staticmethod
+    def _normalize_image_rotation_deg(rotation_deg: float) -> float:
+        normalized = float(rotation_deg) % 360.0
+        allowed = (0.0, 90.0, 180.0, 270.0)
+        closest = min(allowed, key=lambda value: abs(value - normalized))
+        if abs(closest - normalized) > 1e-3:
+            rospy.logwarn(
+                "[usb_c_insertion] event=center_port_image_rotation_rounded requested_deg=%.1f applied_deg=%.1f",
+                rotation_deg,
+                closest,
+            )
+        return closest
 
 
 def main() -> None:

@@ -100,9 +100,10 @@ center_port:
   max_image_age: 0.5
   max_lost_time: 1.0
   min_blob_area: 120.0
+  image_rotation_deg: 180.0
   image_to_tool_rotation_deg: -90.0
-  image_error_to_tool_x_sign: -1.0
-  image_error_to_tool_y_sign: -1.0
+  image_error_to_tool_x_sign: 1.0
+  image_error_to_tool_y_sign: 1.0
   hsv_lower: [35, 70, 40]
   hsv_upper: [90, 255, 255]
   morph_kernel_size: 5
@@ -121,6 +122,7 @@ looming:
   tool_z_direction_sign: 1.0
   max_image_age: 0.5
   max_lost_time: 0.5
+  image_rotation_deg: 180.0
   hsv_lower: [35, 70, 40]
   hsv_upper: [90, 255, 255]
   morph_kernel_size: 5

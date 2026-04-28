@@ -13,7 +13,7 @@
         pkg="tf"
         type="static_transform_publisher"
         name="zed_camera_static_tf"
-        args="0.13076024 0.02140249 0.03070237 0.01391471 -0.03475115 -0.70550715 0.70771351 tool0 zedm_left_camera_optical_frame 100"/>
+        args="0.13076024 0.02140249 0.03070237 -0.03475115 -0.01391471 0.70771351 0.70550715 tool0 zedm_left_camera_optical_frame 100"/>
 
     <node
         name="usb_c_insertion_twist_controller"

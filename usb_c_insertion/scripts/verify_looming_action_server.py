@@ -71,6 +71,9 @@ class VerifyLoomingActionServer:
         self._default_tool_z_direction_sign = float(rospy.get_param("~looming/tool_z_direction_sign", 1.0))
         self._max_image_age = float(rospy.get_param("~looming/max_image_age", 0.5))
         self._max_lost_time = float(rospy.get_param("~looming/max_lost_time", 0.5))
+        self._image_rotation_deg = self._normalize_image_rotation_deg(
+            float(rospy.get_param("~looming/image_rotation_deg", 0.0))
+        )
         self._hsv_lower = self._read_hsv_param("~looming/hsv_lower", (35, 70, 40))
         self._hsv_upper = self._read_hsv_param("~looming/hsv_upper", (90, 255, 255))
         self._morph_kernel_size = max(0, int(rospy.get_param("~looming/morph_kernel_size", 5)))
@@ -95,9 +98,10 @@ class VerifyLoomingActionServer:
         rospy.on_shutdown(self._handle_shutdown)
         self._server.start()
         rospy.loginfo(
-            "[usb_c_insertion] event=verify_looming_action_ready action=%s image_topic=%s",
+            "[usb_c_insertion] event=verify_looming_action_ready action=%s image_topic=%s image_rotation_deg=%.1f",
             self._action_name,
             self._image_topic,
+            self._image_rotation_deg,
         )
 
     def _execute(self, goal) -> None:
@@ -302,7 +306,7 @@ class VerifyLoomingActionServer:
             self._latest_detection = detection
 
     def _detect_green_blob(self, msg: Image) -> GreenBlobDetection:
-        bgr = self._image_to_bgr(msg)
+        bgr = self._rotate_image_for_processing(self._image_to_bgr(msg))
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(
             hsv,
@@ -390,6 +394,15 @@ class VerifyLoomingActionServer:
         if encoding == "bgra8":
             return cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
         return cv2.cvtColor(image, cv2.COLOR_RGBA2BGR)
+
+    def _rotate_image_for_processing(self, bgr: np.ndarray) -> np.ndarray:
+        if self._image_rotation_deg == 0.0:
+            return bgr
+        if self._image_rotation_deg == 90.0:
+            return cv2.rotate(bgr, cv2.ROTATE_90_CLOCKWISE)
+        if self._image_rotation_deg == 180.0:
+            return cv2.rotate(bgr, cv2.ROTATE_180)
+        return cv2.rotate(bgr, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
     def _get_latest_detection(self, min_blob_area: float) -> Optional[GreenBlobDetection]:
         with self._lock:
@@ -554,6 +567,19 @@ class VerifyLoomingActionServer:
             rospy.logwarn("[usb_c_insertion] event=verify_looming_invalid_hsv_param param=%s", param_name)
             value = default_value
         return tuple(max(0, min(255, int(component))) for component in value)
+
+    @staticmethod
+    def _normalize_image_rotation_deg(rotation_deg: float) -> float:
+        normalized = float(rotation_deg) % 360.0
+        allowed = (0.0, 90.0, 180.0, 270.0)
+        closest = min(allowed, key=lambda value: abs(value - normalized))
+        if abs(closest - normalized) > 1e-3:
+            rospy.logwarn(
+                "[usb_c_insertion] event=verify_looming_image_rotation_rounded requested_deg=%.1f applied_deg=%.1f",
+                rotation_deg,
+                closest,
+            )
+        return closest
 
 
 def main() -> None:
