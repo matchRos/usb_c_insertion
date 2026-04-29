@@ -93,10 +93,17 @@ center_port:
   pixel_tolerance: 2.0
   stable_time: 0.35
   command_rate: 40.0
-  gain: 0.0001
+  gain: 0.001
   max_velocity: 0.012
   max_acceleration: 0.03
   output_smoothing_alpha: 0.2
+  coarse_pose_servo_enabled: true
+  coarse_pose_servo_pixel_tolerance: 35.0
+  coarse_pose_servo_position_gain: 0.00005
+  coarse_pose_servo_max_step: 0.025
+  coarse_pose_servo_timeout: 3.0
+  coarse_pose_servo_position_tolerance: 0.002
+  coarse_pose_servo_max_iterations: 3
   max_image_age: 0.5
   max_lost_time: 1.0
   min_blob_area: 120.0

@@ -40,7 +40,8 @@
         output="screen"/>
 
     <node name="camera_pose_publisher" pkg="usb_c_insertion" type="camera_pose_publisher.py" output="screen">
-        <param name="camera_frame" value="zedm_left_camera_optical_frame"/>
+        <param name="camera_frame" value="usb_c_zedm_left_camera_optical_frame"/>
+        <param name="topics/camera_pose_debug" value="/usb_c_insertion/camera_pose"/>
         <param name="camera_pose_publish_rate" value="10.0"/>
     </node>
 
