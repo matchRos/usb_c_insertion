@@ -117,7 +117,7 @@ class SearchPortActionServer:
 
         self._precontact_offset_tool_x = float(rospy.get_param("~state_machine/precontact_offset_tool_x", 0.0))
         self._precontact_offset_tool_y = float(rospy.get_param("~state_machine/precontact_offset_tool_y", 0.0))
-        self._precontact_offset_tool_z = float(rospy.get_param("~state_machine/precontact_offset_tool_z", 0.010))
+        self._precontact_offset_tool_z = float(rospy.get_param("~state_machine/precontact_offset_tool_z", -0.010))
         self._target_offset_tool_x = float(
             rospy.get_param(
                 "~state_machine/target_offset_tool_x",
@@ -131,6 +131,15 @@ class SearchPortActionServer:
             )
         )
         self._move_settle_time = float(rospy.get_param("~motion/action_settle_time", 0.4))
+        self._looming_tool_z_direction_sign = self._sign(
+            rospy.get_param("~looming/tool_z_direction_sign", 1.0)
+        )
+        self._enforce_precontact_standoff = bool(
+            rospy.get_param("~state_machine/enforce_precontact_standoff", True)
+        )
+        self._min_precontact_standoff = abs(
+            float(rospy.get_param("~state_machine/min_precontact_standoff", 0.005))
+        )
 
         self._robot = RobotInterface()
         self._tf = TFInterface()
@@ -200,6 +209,9 @@ class SearchPortActionServer:
         try:
             probe_direction = self._tool_direction(reference_quaternion, (0.0, 0.0, 1.0))
             wall_tangent = self._horizontal_tool_x(reference_quaternion)
+            standoff = self._precontact_standoff_distance()
+            if not self._is_precontact_standoff_safe(standoff):
+                return
             precontact_xyz = self._compute_precontact_xyz(goal.port_pose, reference_quaternion)
         except ValueError as exc:
             self._abort("search_geometry_failed: %s" % exc, "search_geometry_failed")
@@ -208,9 +220,10 @@ class SearchPortActionServer:
         self._publish_feedback("move_to_port_precontact", started_at, 0, 0, None, probe_direction)
         rospy.loginfo(
             "[usb_c_insertion] event=search_precontact_reference "
-            "precontact_offset_tool_z=%.4f port_xyz=(%.4f,%.4f,%.4f) "
+            "precontact_offset_tool_z=%.4f standoff=%.4f port_xyz=(%.4f,%.4f,%.4f) "
             "precontact_xyz=(%.4f,%.4f,%.4f) probe_direction=(%.4f,%.4f,%.4f)",
             self._precontact_offset_tool_z,
+            standoff,
             goal.port_pose.pose.position.x,
             goal.port_pose.pose.position.y,
             goal.port_pose.pose.position.z,
@@ -525,6 +538,21 @@ class SearchPortActionServer:
             port_pose.pose.position.y + offset[1],
             port_pose.pose.position.z + offset[2],
         )
+
+    def _precontact_standoff_distance(self) -> float:
+        return -self._precontact_offset_tool_z * self._looming_tool_z_direction_sign
+
+    def _is_precontact_standoff_safe(self, standoff: float) -> bool:
+        if not self._enforce_precontact_standoff:
+            return True
+        if standoff >= self._min_precontact_standoff:
+            return True
+        self._abort(
+            "unsafe_precontact_offset: precontact_offset_tool_z=%.4f standoff=%.4f min_standoff=%.4f"
+            % (self._precontact_offset_tool_z, standoff, self._min_precontact_standoff),
+            "unsafe_precontact_offset",
+        )
+        return False
 
     def _generate_search_pattern(self):
         if self._search_pattern == "spiral":
@@ -1102,6 +1130,10 @@ class SearchPortActionServer:
     @staticmethod
     def _goal_or_default(value: float, default: float) -> float:
         return float(value) if float(value) > 0.0 else float(default)
+
+    @staticmethod
+    def _sign(value) -> float:
+        return 1.0 if float(value) >= 0.0 else -1.0
 
     @staticmethod
     def _normalize_vector(direction_xyz) -> Tuple[float, float, float]:

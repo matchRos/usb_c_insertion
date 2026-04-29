@@ -237,7 +237,9 @@ state_machine:
   prepose_offset: -0.01
   precontact_offset_tool_x: -0.000
   precontact_offset_tool_y: 0.000
-  precontact_offset_tool_z: 0.010
+  precontact_offset_tool_z: -0.015
+  enforce_precontact_standoff: true
+  min_precontact_standoff: 0.008
   prepose_speed: 0.035
   prepose_timeout: 30.0
   position_tolerance: 0.002

@@ -73,9 +73,18 @@ class PreinsertWorkflowHelpers:
         self._refine_yaw_max_delta_deg = float(rospy.get_param("~workflow/refine_yaw_max_delta_deg", 45.0))
         self._precontact_offset_tool_x = float(rospy.get_param("~state_machine/precontact_offset_tool_x", 0.0))
         self._precontact_offset_tool_y = float(rospy.get_param("~state_machine/precontact_offset_tool_y", 0.0))
-        self._precontact_offset_tool_z = float(rospy.get_param("~state_machine/precontact_offset_tool_z", 0.010))
+        self._precontact_offset_tool_z = float(rospy.get_param("~state_machine/precontact_offset_tool_z", -0.010))
         self._target_offset_tool_x = float(rospy.get_param("~state_machine/target_offset_tool_x", 0.0))
         self._target_offset_tool_y = float(rospy.get_param("~state_machine/target_offset_tool_y", 0.0))
+        self._looming_tool_z_direction_sign = self._sign(
+            rospy.get_param("~looming/tool_z_direction_sign", 1.0)
+        )
+        self._enforce_precontact_standoff = bool(
+            rospy.get_param("~state_machine/enforce_precontact_standoff", True)
+        )
+        self._min_precontact_standoff = abs(
+            float(rospy.get_param("~state_machine/min_precontact_standoff", 0.005))
+        )
 
         self._tf = TFInterface()
         self._move_client = actionlib.SimpleActionClient(self._move_action_name, MoveToPoseAction)
@@ -407,6 +416,10 @@ class PreinsertWorkflowHelpers:
         return port_pose
 
     def plan_tcp_precontact_pose(self, port_pose: PoseStamped) -> Optional[PoseStamped]:
+        standoff = self._precontact_standoff_distance()
+        if not self._is_precontact_standoff_safe(standoff):
+            return None
+
         current_pose = self._tf.get_tool_pose_in_base()
         if current_pose is None:
             rospy.logerr("[usb_c_insertion] event=preinsert_workflow_failed reason=precontact_tool_pose_unavailable")
@@ -426,15 +439,37 @@ class PreinsertWorkflowHelpers:
         target_pose.pose.position.z = port_pose.pose.position.z + offset_base[2]
         target_pose.pose.orientation = current_pose.pose.orientation
         rospy.loginfo(
-            "[usb_c_insertion] event=preinsert_tcp_precontact_planned x=%.4f y=%.4f z=%.4f offset_base=(%.4f,%.4f,%.4f)",
+            "[usb_c_insertion] event=preinsert_tcp_precontact_planned x=%.4f y=%.4f z=%.4f offset_tool=(%.4f,%.4f,%.4f) standoff=%.4f offset_base=(%.4f,%.4f,%.4f)",
             target_pose.pose.position.x,
             target_pose.pose.position.y,
             target_pose.pose.position.z,
+            self._target_offset_tool_x + self._precontact_offset_tool_x,
+            self._target_offset_tool_y + self._precontact_offset_tool_y,
+            self._precontact_offset_tool_z,
+            standoff,
             offset_base[0],
             offset_base[1],
             offset_base[2],
         )
         return target_pose
+
+    def _precontact_standoff_distance(self) -> float:
+        return -self._precontact_offset_tool_z * self._looming_tool_z_direction_sign
+
+    def _is_precontact_standoff_safe(self, standoff: float) -> bool:
+        if not self._enforce_precontact_standoff:
+            return True
+        if standoff >= self._min_precontact_standoff:
+            return True
+        rospy.logerr(
+            "[usb_c_insertion] event=preinsert_workflow_failed reason=unsafe_precontact_offset "
+            "precontact_offset_tool_z=%.4f looming_tool_z_direction_sign=%.1f standoff=%.4f min_standoff=%.4f",
+            self._precontact_offset_tool_z,
+            self._looming_tool_z_direction_sign,
+            standoff,
+            self._min_precontact_standoff,
+        )
+        return False
 
     def _build_estimate_goal(self) -> EstimateHousingPlaneGoal:
         goal = EstimateHousingPlaneGoal()
@@ -510,6 +545,10 @@ class PreinsertWorkflowHelpers:
                 pose.pose.orientation.w,
             )
         )
+
+    @staticmethod
+    def _sign(value) -> float:
+        return 1.0 if float(value) >= 0.0 else -1.0
 
     @staticmethod
     def _move_feedback_callback(feedback) -> None:
