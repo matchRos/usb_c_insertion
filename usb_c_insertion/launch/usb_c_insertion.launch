@@ -11,109 +11,77 @@
         pkg="usb_c_insertion"
         type="center_port_in_image_action_server.py"
         name="usb_c_insertion_center_port_in_image_action_server"
-        output="screen">
-    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+        output="screen" clear_params="true">
   </node>
 
   <node unless="$(arg publish_vision_pose_only)"
         pkg="usb_c_insertion"
         type="verify_looming_action_server.py"
         name="usb_c_insertion_verify_looming_action_server"
-        output="screen">
-    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+        output="screen" clear_params="true">
   </node>
 
   <node unless="$(arg publish_vision_pose_only)"
         pkg="usb_c_insertion"
         type="estimate_housing_plane_action_server.py"
         name="usb_c_insertion_estimate_housing_plane_action_server"
-        output="screen">
-    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+        output="screen" clear_params="true">
   </node>
 
   <node unless="$(arg publish_vision_pose_only)"
         pkg="usb_c_insertion"
         type="move_to_pose_action_server.py"
         name="usb_c_insertion_move_to_pose_action_server"
-        output="screen">
-    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+        output="screen" clear_params="true">
   </node>
 
   <node unless="$(arg publish_vision_pose_only)"
         pkg="usb_c_insertion"
         type="align_housing_yaw_action_server.py"
         name="usb_c_insertion_align_housing_yaw_action_server"
-        output="screen">
-    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+        output="screen" clear_params="true">
   </node>
 
   <node unless="$(arg publish_vision_pose_only)"
         pkg="usb_c_insertion"
         type="probe_surface_action_server.py"
         name="usb_c_insertion_probe_surface_action_server"
-        output="screen">
-    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+        output="screen" clear_params="true">
   </node>
 
   <node unless="$(arg publish_vision_pose_only)"
         pkg="usb_c_insertion"
         type="insert_cable_action_server.py"
         name="usb_c_insertion_insert_cable_action_server"
-        output="screen">
-    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+        output="screen" clear_params="true">
   </node>
 
   <node unless="$(arg publish_vision_pose_only)"
         pkg="usb_c_insertion"
         type="verify_insertion_action_server.py"
         name="usb_c_insertion_verify_insertion_action_server"
-        output="screen">
-    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+        output="screen" clear_params="true">
   </node>
 
   <node unless="$(arg publish_vision_pose_only)"
         pkg="usb_c_insertion"
         type="search_port_action_server.py"
         name="usb_c_insertion_search_port_action_server"
-        output="screen">
-    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+        output="screen" clear_params="true">
   </node>
 
   <node unless="$(arg publish_vision_pose_only)"
         pkg="usb_c_insertion"
         type="compute_prepose_service.py"
         name="usb_c_insertion_compute_prepose_service"
-        output="screen">
-    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+        output="screen" clear_params="true">
   </node>
 
   <node unless="$(arg publish_vision_pose_only)"
         pkg="usb_c_insertion"
         type="run_vision_service.py"
         name="usb_c_insertion_run_vision_service"
-        output="screen">
-    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+        output="screen" clear_params="true">
     <param name="run_vision_script_path" value="$(arg run_vision_script_path)" />
     <param name="vision_pose_json_path" value="$(arg vision_pose_json_path)" />
   </node>
@@ -122,10 +90,7 @@
         pkg="usb_c_insertion"
         type="vision_pose_publisher.py"
         name="usb_c_insertion_vision_pose_publisher"
-        output="screen">
-    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+        output="screen" clear_params="true">
     <param name="vision_pose_json_path" value="$(arg vision_pose_json_path)" />
   </node>
 

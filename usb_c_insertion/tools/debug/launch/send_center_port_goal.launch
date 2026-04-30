@@ -1,11 +1,12 @@
 <launch>
   <arg name="image_topic" default="/zedm/zed_node/left/image_rect_color" />
 
+  <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+
   <node pkg="usb_c_insertion"
         type="tools/debug/scripts/send_center_port_goal.py"
         name="usb_c_insertion_center_port_goal_client"
-        output="screen">
-    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
-    <param name="center_port/image_topic" value="$(arg image_topic)" />
+        output="screen" clear_params="true">
+    <param name="image_topic" value="$(arg image_topic)" />
   </node>
 </launch>

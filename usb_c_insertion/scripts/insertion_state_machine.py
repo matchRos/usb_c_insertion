@@ -18,6 +18,7 @@ from contact_detector import ContactDetector
 from extraction_controller import ExtractionController
 from ft_interface import FTInterface
 from insertion_controller import InsertionController
+from param_utils import get_param
 from post_insertion_verifier import PostInsertionVerifier
 from prepose_planner import tool_offset_to_port_offset
 from robot_interface import RobotInterface
@@ -62,85 +63,85 @@ class InsertionStateMachine:
         self._robot = RobotInterface()
         self._tf = TFInterface()
         self._ft = FTInterface(
-            wrench_topic=rospy.get_param("~topics/wrench", "/wrench"),
-            filter_window_size=rospy.get_param("~contact/baseline_window", 20),
-            wrench_timeout=rospy.get_param("~contact/wrench_timeout", 0.2),
+            wrench_topic=get_param("~topics/wrench", "/wrench"),
+            filter_window_size=get_param("~contact/baseline_window", 20),
+            wrench_timeout=get_param("~contact/wrench_timeout", 0.2),
         )
         self._contact_detector = ContactDetector(
             self._ft,
-            hysteresis=rospy.get_param("~contact/hysteresis", 0.5),
+            hysteresis=get_param("~contact/hysteresis", 0.5),
         )
         self._wall_probe = WallProbe(self._robot, self._tf, self._contact_detector)
         self._insertion_controller = InsertionController(self._robot, self._tf, self._ft)
         self._post_insertion_verifier = PostInsertionVerifier(self._robot, self._tf, self._ft)
         self._extraction_controller = ExtractionController(self._robot, self._tf, self._ft)
 
-        self._command_rate = float(rospy.get_param("~motion/command_rate", 100.0))
-        self._probe_speed = float(rospy.get_param("~motion/probe_speed", 0.003))
-        self._search_speed = float(rospy.get_param("~motion/search_speed", 0.002))
-        self._move_speed = float(rospy.get_param("~motion/move_speed", 0.01))
-        self._max_probe_distance = float(rospy.get_param("~probe/max_probe_distance", 0.05))
-        self._probe_timeout = float(rospy.get_param("~probe/probe_timeout", 10.0))
-        self._inter_probe_backoff_distance = float(rospy.get_param("~probe/inter_probe_backoff_distance", 0.01))
-        self._second_probe_y_offset = float(rospy.get_param("~probe/second_probe_y_offset", 0.02))
-        self._probe_normal_direction_sign = float(rospy.get_param("~probe/normal_direction_sign", -1.0))
-        self._retract_distance = float(rospy.get_param("~probe/retract_distance", 0.01))
-        self._search_step_y = float(rospy.get_param("~search/step_y", 0.0015))
-        self._search_step_z = float(rospy.get_param("~search/step_z", 0.0015))
-        self._search_width = float(rospy.get_param("~search/max_search_width", 0.01))
-        self._search_height = float(rospy.get_param("~search/max_search_height", 0.01))
-        self._search_timeout = float(rospy.get_param("~search/search_timeout", 20.0))
-        self._search_traverse_speed = float(rospy.get_param("~motion/search_traverse_speed", 0.012))
-        self._search_contact_force_target = float(rospy.get_param("~search/contact_force_target", 4.0))
-        self._search_contact_force_tolerance = float(rospy.get_param("~search/contact_force_tolerance", 0.5))
-        self._search_force_control_gain = float(rospy.get_param("~search/force_control_gain", 0.001))
-        self._search_force_control_speed_limit = float(rospy.get_param("~search/force_control_speed_limit", 0.002))
-        self._search_force_control_timeout = float(rospy.get_param("~search/force_control_timeout", 2.0))
-        self._search_socket_depth_threshold = float(rospy.get_param("~search/socket_depth_threshold", 0.002))
-        self._force_threshold_x = float(rospy.get_param("~contact/force_threshold_x", 4.0))
-        self._force_threshold_norm = float(rospy.get_param("~contact/force_threshold_norm", 5.0))
-        self._auto_zero_ft = bool(rospy.get_param("~state_machine/auto_zero_ft", True))
-        self._stop_after_state_name = str(rospy.get_param("~state_machine/stop_after_state", "")).strip().upper()
+        self._command_rate = float(get_param("~motion/command_rate", 100.0))
+        self._probe_speed = float(get_param("~motion/probe_speed", 0.003))
+        self._search_speed = float(get_param("~motion/search_speed", 0.002))
+        self._move_speed = float(get_param("~motion/move_speed", 0.01))
+        self._max_probe_distance = float(get_param("~probe/max_probe_distance", 0.05))
+        self._probe_timeout = float(get_param("~probe/probe_timeout", 10.0))
+        self._inter_probe_backoff_distance = float(get_param("~probe/inter_probe_backoff_distance", 0.01))
+        self._second_probe_y_offset = float(get_param("~probe/second_probe_y_offset", 0.02))
+        self._probe_normal_direction_sign = float(get_param("~probe/normal_direction_sign", -1.0))
+        self._retract_distance = float(get_param("~probe/retract_distance", 0.01))
+        self._search_step_y = float(get_param("~search/step_y", 0.0015))
+        self._search_step_z = float(get_param("~search/step_z", 0.0015))
+        self._search_width = float(get_param("~search/max_search_width", 0.01))
+        self._search_height = float(get_param("~search/max_search_height", 0.01))
+        self._search_timeout = float(get_param("~search/search_timeout", 20.0))
+        self._search_traverse_speed = float(get_param("~motion/search_traverse_speed", 0.012))
+        self._search_contact_force_target = float(get_param("~search/contact_force_target", 4.0))
+        self._search_contact_force_tolerance = float(get_param("~search/contact_force_tolerance", 0.5))
+        self._search_force_control_gain = float(get_param("~search/force_control_gain", 0.001))
+        self._search_force_control_speed_limit = float(get_param("~search/force_control_speed_limit", 0.002))
+        self._search_force_control_timeout = float(get_param("~search/force_control_timeout", 2.0))
+        self._search_socket_depth_threshold = float(get_param("~search/socket_depth_threshold", 0.002))
+        self._force_threshold_x = float(get_param("~contact/force_threshold_x", 4.0))
+        self._force_threshold_norm = float(get_param("~contact/force_threshold_norm", 5.0))
+        self._auto_zero_ft = bool(get_param("~state_machine/auto_zero_ft", True))
+        self._stop_after_state_name = str(get_param("~state_machine/stop_after_state", "")).strip().upper()
 
-        self._port_x = float(rospy.get_param("~port_estimate/x", 0.45))
-        self._port_y = float(rospy.get_param("~port_estimate/y", 0.0))
-        self._port_z = float(rospy.get_param("~port_estimate/z", 0.2))
-        self._port_qx = float(rospy.get_param("~port_estimate/qx", 0.0))
-        self._port_qy = float(rospy.get_param("~port_estimate/qy", 0.0))
-        self._port_qz = float(rospy.get_param("~port_estimate/qz", 0.0))
-        self._port_qw = float(rospy.get_param("~port_estimate/qw", 1.0))
-        self._vision_pose_json_path = str(rospy.get_param("~vision_pose_json_path", "")).strip()
+        self._port_x = float(get_param("~port_estimate/x", 0.45))
+        self._port_y = float(get_param("~port_estimate/y", 0.0))
+        self._port_z = float(get_param("~port_estimate/z", 0.2))
+        self._port_qx = float(get_param("~port_estimate/qx", 0.0))
+        self._port_qy = float(get_param("~port_estimate/qy", 0.0))
+        self._port_qz = float(get_param("~port_estimate/qz", 0.0))
+        self._port_qw = float(get_param("~port_estimate/qw", 1.0))
+        self._vision_pose_json_path = str(get_param("~vision_pose_json_path", "")).strip()
         self._target_offset_tool_x = float(
-            rospy.get_param(
+            get_param(
                 "~state_machine/target_offset_tool_x",
-                rospy.get_param(
+                get_param(
                     "~state_machine/probe_offset_tool_x",
-                    rospy.get_param(
+                    get_param(
                         "~state_machine/prepose_offset_tool_x",
-                        -float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0)),
+                        -float(get_param("~state_machine/prepose_offset_port_y", 0.0)),
                     ),
                 ),
             )
         )
         self._target_offset_tool_y = float(
-            rospy.get_param(
+            get_param(
                 "~state_machine/target_offset_tool_y",
-                rospy.get_param(
+                get_param(
                     "~state_machine/probe_offset_tool_y",
-                    rospy.get_param(
+                    get_param(
                         "~state_machine/prepose_offset_tool_y",
-                        float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0)),
+                        float(get_param("~state_machine/prepose_offset_port_z", 0.0)),
                     ),
                 ),
             )
         )
         if rospy.has_param("~state_machine/prepose_offset"):
-            self._prepose_offset = float(rospy.get_param("~state_machine/prepose_offset"))
+            self._prepose_offset = float(get_param("~state_machine/prepose_offset"))
         else:
             self._prepose_offset = float(
-                rospy.get_param(
+                get_param(
                     "~state_machine/prepose_offset_tool_z",
-                    -float(rospy.get_param("~state_machine/prepose_offset_port_x", -0.05)),
+                    -float(get_param("~state_machine/prepose_offset_port_x", -0.05)),
                 )
             )
         (
@@ -165,24 +166,24 @@ class InsertionStateMachine:
                 0.0,
             )
         )
-        self._prepose_speed = float(rospy.get_param("~state_machine/prepose_speed", self._move_speed))
-        self._prepose_timeout = float(rospy.get_param("~state_machine/prepose_timeout", 30.0))
+        self._prepose_speed = float(get_param("~state_machine/prepose_speed", self._move_speed))
+        self._prepose_timeout = float(get_param("~state_machine/prepose_timeout", 30.0))
         self._precontact_offset_tool_x = float(
-            rospy.get_param(
+            get_param(
                 "~state_machine/precontact_offset_tool_x",
-                -float(rospy.get_param("~state_machine/precontact_offset_port_y", 0.0)),
+                -float(get_param("~state_machine/precontact_offset_port_y", 0.0)),
             )
         )
         self._precontact_offset_tool_y = float(
-            rospy.get_param(
+            get_param(
                 "~state_machine/precontact_offset_tool_y",
-                float(rospy.get_param("~state_machine/precontact_offset_port_z", 0.0)),
+                float(get_param("~state_machine/precontact_offset_port_z", 0.0)),
             )
         )
         self._precontact_offset_tool_z = float(
-            rospy.get_param(
+            get_param(
                 "~state_machine/precontact_offset_tool_z",
-                -float(rospy.get_param("~state_machine/precontact_offset_port_x", -0.01)),
+                -float(get_param("~state_machine/precontact_offset_port_x", -0.01)),
             )
         )
         (
@@ -196,9 +197,9 @@ class InsertionStateMachine:
                 self._precontact_offset_tool_z,
             )
         )
-        self._yaw_alignment_gain = float(rospy.get_param("~state_machine/yaw_alignment_gain", 0.8))
-        self._yaw_tolerance = float(rospy.get_param("~state_machine/yaw_tolerance", 0.03))
-        self._position_tolerance = float(rospy.get_param("~state_machine/position_tolerance", 0.002))
+        self._yaw_alignment_gain = float(get_param("~state_machine/yaw_alignment_gain", 0.8))
+        self._yaw_tolerance = float(get_param("~state_machine/yaw_tolerance", 0.03))
+        self._position_tolerance = float(get_param("~state_machine/position_tolerance", 0.002))
         self._probe_result_1: Optional[ProbeResult] = None
         self._probe_result_2: Optional[ProbeResult] = None
         self._wall_estimate = None

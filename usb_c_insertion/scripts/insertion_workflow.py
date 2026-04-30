@@ -79,8 +79,6 @@ class InsertionWorkflow:
     """
 
     def __init__(self):
-        self._mirror_global_config_to_private_namespace()
-
         self._base_frame = required_str_param("~frames/base_frame")
         self._zero_ft_before_contact = required_bool_param("~insertion_workflow/zero_ft_before_contact")
         self._zero_ft_settle_time = required_float_param("~insertion_workflow/zero_ft_settle_time")
@@ -221,35 +219,6 @@ class InsertionWorkflow:
             latch=True,
         )
         rospy.on_shutdown(self._handle_shutdown)
-
-    def _mirror_global_config_to_private_namespace(self) -> None:
-        namespaces = (
-            "frames",
-            "topics",
-            "motion",
-            "contact",
-            "probe",
-            "insert",
-            "verify",
-            "gripper",
-            "insertion_workflow",
-        )
-        mirrored = []
-        for namespace in namespaces:
-            private_name = "~%s" % namespace
-            global_name = "/%s" % namespace
-            if not rospy.has_param(global_name):
-                continue
-            global_value = rospy.get_param(global_name)
-            if rospy.has_param(private_name) and rospy.get_param(private_name) == global_value:
-                continue
-            rospy.set_param(private_name, global_value)
-            mirrored.append(namespace)
-        if mirrored:
-            rospy.loginfo(
-                "[usb_c_insertion] event=insertion_workflow_params_mirrored_from_global namespaces=%s",
-                ",".join(mirrored),
-            )
 
     def run(self) -> bool:
         rospy.loginfo("[usb_c_insertion] event=insertion_workflow_start")

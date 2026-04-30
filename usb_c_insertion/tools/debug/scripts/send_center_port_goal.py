@@ -2,18 +2,27 @@
 
 from __future__ import annotations
 
+import os
+import sys
+
 import actionlib
 import rospy
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PACKAGE_SCRIPTS_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "..", "scripts"))
+if PACKAGE_SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, PACKAGE_SCRIPTS_DIR)
+
+from param_utils import get_param
 from usb_c_insertion.msg import CenterPortInImageAction, CenterPortInImageGoal
 
 
 class CenterPortGoalClient:
     def __init__(self):
-        self._action_name = str(rospy.get_param("~center_port/action_name", "center_port_in_image")).strip()
-        self._wait_timeout = float(rospy.get_param("~center_port/client_wait_timeout", 5.0))
+        self._action_name = str(get_param("~center_port/action_name", "center_port_in_image")).strip()
+        self._wait_timeout = float(get_param("~center_port/client_wait_timeout", 5.0))
         self._result_timeout = float(
-            rospy.get_param("~center_port/client_result_timeout", rospy.get_param("~center_port/timeout", 10.0) + 2.0)
+            get_param("~center_port/client_result_timeout", get_param("~center_port/timeout", 10.0) + 2.0)
         )
         self._client = actionlib.SimpleActionClient(self._action_name, CenterPortInImageAction)
 
@@ -71,14 +80,14 @@ class CenterPortGoalClient:
     def _build_goal(self) -> CenterPortInImageGoal:
         goal = CenterPortInImageGoal()
         goal.image_topic = str(
-            rospy.get_param("~center_port/image_topic", "/zedm/zed_node/left/image_rect_color")
+            get_param("~image_topic", get_param("~center_port/image_topic", "/zedm/zed_node/left/image_rect_color"))
         ).strip()
-        goal.timeout = float(rospy.get_param("~center_port/timeout", 10.0))
-        goal.pixel_tolerance = float(rospy.get_param("~center_port/pixel_tolerance", 12.0))
-        goal.stable_time = float(rospy.get_param("~center_port/stable_time", 0.35))
-        goal.max_velocity = float(rospy.get_param("~center_port/max_velocity", 0.006))
-        goal.gain = float(rospy.get_param("~center_port/gain", 0.00002))
-        goal.min_blob_area = float(rospy.get_param("~center_port/min_blob_area", 120.0))
+        goal.timeout = float(get_param("~center_port/timeout", 10.0))
+        goal.pixel_tolerance = float(get_param("~center_port/pixel_tolerance", 12.0))
+        goal.stable_time = float(get_param("~center_port/stable_time", 0.35))
+        goal.max_velocity = float(get_param("~center_port/max_velocity", 0.006))
+        goal.gain = float(get_param("~center_port/gain", 0.00002))
+        goal.min_blob_area = float(get_param("~center_port/min_blob_area", 120.0))
         return goal
 
     @staticmethod

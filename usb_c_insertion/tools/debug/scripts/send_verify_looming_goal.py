@@ -2,18 +2,27 @@
 
 from __future__ import annotations
 
+import os
+import sys
+
 import actionlib
 import rospy
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PACKAGE_SCRIPTS_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "..", "scripts"))
+if PACKAGE_SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, PACKAGE_SCRIPTS_DIR)
+
+from param_utils import get_param
 from usb_c_insertion.msg import VerifyLoomingAction, VerifyLoomingGoal
 
 
 class VerifyLoomingGoalClient:
     def __init__(self):
-        self._action_name = str(rospy.get_param("~looming/action_name", "verify_looming")).strip()
-        self._wait_timeout = float(rospy.get_param("~looming/client_wait_timeout", 5.0))
+        self._action_name = str(get_param("~looming/action_name", "verify_looming")).strip()
+        self._wait_timeout = float(get_param("~looming/client_wait_timeout", 5.0))
         self._result_timeout = float(
-            rospy.get_param("~looming/client_result_timeout", rospy.get_param("~looming/timeout", 8.0) + 2.0)
+            get_param("~looming/client_result_timeout", get_param("~looming/timeout", 8.0) + 2.0)
         )
         self._client = actionlib.SimpleActionClient(self._action_name, VerifyLoomingAction)
 
@@ -68,15 +77,19 @@ class VerifyLoomingGoalClient:
 
     def _build_goal(self) -> VerifyLoomingGoal:
         goal = VerifyLoomingGoal()
-        goal.image_topic = str(rospy.get_param("~looming/image_topic", "/zedm/zed_node/left/image_rect_color")).strip()
-        goal.travel_distance = float(rospy.get_param("~looming/travel_distance", 0.025))
-        goal.travel_speed = float(rospy.get_param("~looming/travel_speed", 0.006))
-        goal.timeout = float(rospy.get_param("~looming/timeout", 8.0))
-        goal.min_blob_area = float(rospy.get_param("~looming/min_blob_area", 120.0))
-        goal.min_scale_ratio = float(rospy.get_param("~looming/min_scale_ratio", 1.12))
-        goal.max_center_shift_px = float(rospy.get_param("~looming/max_center_shift_px", 10.0))
-        goal.max_aspect_ratio_change = float(rospy.get_param("~looming/max_aspect_ratio_change", 0.35))
-        goal.tool_z_direction_sign = float(rospy.get_param("~looming/tool_z_direction_sign", 1.0))
+        goal.image_topic = str(
+            get_param("~image_topic", get_param("~looming/image_topic", "/zedm/zed_node/left/image_rect_color"))
+        ).strip()
+        goal.travel_distance = float(get_param("~looming/travel_distance", 0.025))
+        goal.travel_speed = float(get_param("~looming/travel_speed", 0.006))
+        goal.timeout = float(get_param("~looming/timeout", 8.0))
+        goal.min_blob_area = float(get_param("~looming/min_blob_area", 120.0))
+        goal.min_scale_ratio = float(get_param("~looming/min_scale_ratio", 1.12))
+        goal.max_center_shift_px = float(get_param("~looming/max_center_shift_px", 10.0))
+        goal.max_aspect_ratio_change = float(get_param("~looming/max_aspect_ratio_change", 0.35))
+        goal.tool_z_direction_sign = float(
+            get_param("~tool_z_direction_sign", get_param("~looming/tool_z_direction_sign", 1.0))
+        )
         return goal
 
     @staticmethod

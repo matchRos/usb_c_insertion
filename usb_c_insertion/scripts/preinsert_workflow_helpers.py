@@ -48,8 +48,6 @@ class PreinsertWorkflowHelpers:
     """
 
     def __init__(self):
-        self._mirror_global_config_to_private_namespace()
-
         self.base_frame = self._required_str_param("~frames/base_frame")
         self.tool_frame = self._required_str_param("~frames/tool_frame")
 
@@ -90,55 +88,12 @@ class PreinsertWorkflowHelpers:
         self._looming_client = actionlib.SimpleActionClient(self._looming_action_name, VerifyLoomingAction)
         self._last_center_port_result = None
 
-    def _mirror_global_config_to_private_namespace(self) -> None:
-        """
-        Keep the workflow's private params in sync with global launch config.
-
-        ROS params survive node restarts. A manually started workflow may have
-        stale private `/usb_c_insertion_preinsert_alignment_workflow/...`
-        params from an older run, so refresh private config from the global
-        YAML namespaces whenever those globals exist.
-        """
-        namespaces = (
-            "frames",
-            "topics",
-            "motion",
-            "micro_motion",
-            "contact",
-            "probe",
-            "search",
-            "center_port",
-            "looming",
-            "housing_plane",
-            "align_housing_yaw",
-            "insert",
-            "verify",
-            "extract",
-            "gripper",
-            "state_machine",
-            "workflow",
-            "photo_pose",
-            "presentation_snapshots",
-        )
-        mirrored = []
-        for namespace in namespaces:
-            private_name = "~%s" % namespace
-            global_name = "/%s" % namespace
-            if not rospy.has_param(global_name):
-                continue
-            global_value = rospy.get_param(global_name)
-            if rospy.has_param(private_name) and rospy.get_param(private_name) == global_value:
-                continue
-            rospy.set_param(private_name, global_value)
-            mirrored.append(namespace)
-        if mirrored:
-            rospy.loginfo(
-                "[usb_c_insertion] event=preinsert_params_mirrored_from_global namespaces=%s",
-                ",".join(mirrored),
-            )
-
     @staticmethod
     def _required_param(name: str):
+        if name.startswith("~"):
+            global_name = "/" + name[1:].lstrip("/")
+            if rospy.has_param(global_name):
+                return rospy.get_param(global_name)
         if rospy.has_param(name):
             return rospy.get_param(name)
         resolved_name = rospy.resolve_name(name)

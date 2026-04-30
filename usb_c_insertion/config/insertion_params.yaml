@@ -336,7 +336,7 @@ presentation_snapshots:
 state_machine:
   auto_zero_ft: true
   target_offset_tool_x: +0.0
-  target_offset_tool_y: -0.002
+  target_offset_tool_y: +0.002
   prepose_offset: -0.01
   precontact_offset_tool_x: -0.000
   precontact_offset_tool_y: 0.000

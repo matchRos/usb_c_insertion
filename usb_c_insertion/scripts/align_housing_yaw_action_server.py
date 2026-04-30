@@ -51,8 +51,6 @@ class AlignHousingYawActionServer:
     """
 
     def __init__(self):
-        self._mirror_global_config_to_private_namespace()
-
         self._action_name = required_str_param("~align_housing_yaw/action_name")
         self._estimate_action_name = required_str_param("~align_housing_yaw/estimate_action_name")
         self._move_action_name = required_str_param("~align_housing_yaw/move_action_name")
@@ -96,34 +94,6 @@ class AlignHousingYawActionServer:
             self._tool_axis[2],
             self._target_axis_from_plane_normal_sign,
         )
-
-    def _mirror_global_config_to_private_namespace(self) -> None:
-        """
-        Keep manually started action-server params in sync with global YAML.
-        """
-        namespaces = (
-            "frames",
-            "topics",
-            "motion",
-            "housing_plane",
-            "align_housing_yaw",
-        )
-        mirrored = []
-        for namespace in namespaces:
-            private_name = "~%s" % namespace
-            global_name = "/%s" % namespace
-            if not rospy.has_param(global_name):
-                continue
-            global_value = rospy.get_param(global_name)
-            if rospy.has_param(private_name) and rospy.get_param(private_name) == global_value:
-                continue
-            rospy.set_param(private_name, global_value)
-            mirrored.append(namespace)
-        if mirrored:
-            rospy.loginfo(
-                "[usb_c_insertion] event=align_housing_yaw_params_mirrored_from_global namespaces=%s",
-                ",".join(mirrored),
-            )
 
     def _execute(self, goal) -> None:
         started_at = rospy.Time.now()

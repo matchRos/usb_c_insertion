@@ -15,6 +15,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from ft_interface import FTInterface
+from param_utils import get_param
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
 
@@ -48,27 +49,27 @@ class ExtractionController:
         self._tf = tf_interface
         self._ft = ft_interface
 
-        self._command_rate = float(rospy.get_param("~motion/command_rate", 500.0))
-        self._extract_distance = float(rospy.get_param("~extract/distance", 0.04))
-        self._target_pull_force = float(rospy.get_param("~extract/pull_force_target", 8.0))
-        self._pull_force_tolerance = float(rospy.get_param("~extract/pull_force_tolerance", 1.0))
-        self._pull_force_gain = float(rospy.get_param("~extract/pull_force_gain", 0.01))
-        self._max_pull_speed = float(rospy.get_param("~extract/max_pull_speed", 0.01))
-        self._pulsed_enabled = bool(rospy.get_param("~extract/pulsed_enabled", False))
-        self._pulse_pull_duration = float(rospy.get_param("~extract/pulse_pull_duration", 0.25))
-        self._pulse_rest_duration = float(rospy.get_param("~extract/pulse_rest_duration", 0.15))
-        self._pulse_min_pull_speed = float(rospy.get_param("~extract/pulse_min_pull_speed", 0.002))
+        self._command_rate = float(get_param("~motion/command_rate", 500.0))
+        self._extract_distance = float(get_param("~extract/distance", 0.04))
+        self._target_pull_force = float(get_param("~extract/pull_force_target", 8.0))
+        self._pull_force_tolerance = float(get_param("~extract/pull_force_tolerance", 1.0))
+        self._pull_force_gain = float(get_param("~extract/pull_force_gain", 0.01))
+        self._max_pull_speed = float(get_param("~extract/max_pull_speed", 0.01))
+        self._pulsed_enabled = bool(get_param("~extract/pulsed_enabled", False))
+        self._pulse_pull_duration = float(get_param("~extract/pulse_pull_duration", 0.25))
+        self._pulse_rest_duration = float(get_param("~extract/pulse_rest_duration", 0.15))
+        self._pulse_min_pull_speed = float(get_param("~extract/pulse_min_pull_speed", 0.002))
         self._pulse_pull_force_target = float(
-            rospy.get_param("~extract/pulse_pull_force_target", self._target_pull_force)
+            get_param("~extract/pulse_pull_force_target", self._target_pull_force)
         )
-        self._tool_z_direction_sign = float(rospy.get_param("~extract/tool_z_direction_sign", 1.0))
-        self._wiggle_speed_y = float(rospy.get_param("~extract/wiggle_speed_y", 0.002))
-        self._wiggle_speed_z = float(rospy.get_param("~extract/wiggle_speed_z", 0.002))
-        self._wiggle_frequency = float(rospy.get_param("~extract/wiggle_frequency", 2.0))
-        self._timeout = float(rospy.get_param("~extract/timeout", 8.0))
-        self._max_lateral_force = float(rospy.get_param("~extract/max_lateral_force", 20.0))
-        self._max_torque_norm = float(rospy.get_param("~extract/max_torque_norm", 3.0))
-        self._release_after_extract = bool(rospy.get_param("~extract/release_after_extract", True))
+        self._tool_z_direction_sign = float(get_param("~extract/tool_z_direction_sign", 1.0))
+        self._wiggle_speed_y = float(get_param("~extract/wiggle_speed_y", 0.002))
+        self._wiggle_speed_z = float(get_param("~extract/wiggle_speed_z", 0.002))
+        self._wiggle_frequency = float(get_param("~extract/wiggle_frequency", 2.0))
+        self._timeout = float(get_param("~extract/timeout", 8.0))
+        self._max_lateral_force = float(get_param("~extract/max_lateral_force", 20.0))
+        self._max_torque_norm = float(get_param("~extract/max_torque_norm", 3.0))
+        self._release_after_extract = bool(get_param("~extract/release_after_extract", True))
 
     def extract(self) -> ExtractionResult:
         """

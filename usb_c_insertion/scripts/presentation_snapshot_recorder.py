@@ -535,12 +535,12 @@ class PresentationSnapshotRecorder:
 
     @classmethod
     def _param(cls, name: str, default):
-        if rospy.has_param(name):
-            return rospy.get_param(name)
         if name.startswith("~"):
             global_name = "/" + name[1:].lstrip("/")
             if rospy.has_param(global_name):
                 return rospy.get_param(global_name)
+        if rospy.has_param(name):
+            return rospy.get_param(name)
         return default
 
     @classmethod

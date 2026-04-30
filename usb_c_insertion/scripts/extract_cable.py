@@ -13,6 +13,7 @@ if SCRIPT_DIR not in sys.path:
 
 from extraction_controller import ExtractionController
 from ft_interface import FTInterface
+from param_utils import get_param
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
 
@@ -22,10 +23,10 @@ def main() -> None:
     robot = RobotInterface()
     tf_interface = TFInterface()
     ft_interface = FTInterface(
-        wrench_topic=rospy.get_param("~topics/wrench", "/wrench"),
-        filter_window_size=rospy.get_param("~contact/baseline_window", 20),
-        wrench_timeout=rospy.get_param("~contact/wrench_timeout", 0.2),
-        zero_service_name=rospy.get_param("~topics/zero_ft_service", "/ur_hardware_interface/zero_ftsensor"),
+        wrench_topic=get_param("~topics/wrench", "/wrench"),
+        filter_window_size=get_param("~contact/baseline_window", 20),
+        wrench_timeout=get_param("~contact/wrench_timeout", 0.2),
+        zero_service_name=get_param("~topics/zero_ft_service", "/ur_hardware_interface/zero_ftsensor"),
     )
     controller = ExtractionController(robot, tf_interface, ft_interface)
 
@@ -33,7 +34,7 @@ def main() -> None:
         rospy.logerr("[usb_c_insertion] event=extract_cable_failed reason=motion_pipeline_not_ready")
         sys.exit(1)
 
-    auto_zero_ft = bool(rospy.get_param("~extract/auto_zero_ft", True))
+    auto_zero_ft = bool(get_param("~auto_zero_ft", True))
     if auto_zero_ft:
         if not ft_interface.zero_sensor():
             rospy.logerr("[usb_c_insertion] event=extract_cable_failed reason=zero_ft_failed")

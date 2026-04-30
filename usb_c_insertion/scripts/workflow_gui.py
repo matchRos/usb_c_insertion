@@ -17,6 +17,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
+from param_utils import get_param
+
 
 class WorkflowGui:
     """
@@ -24,9 +26,9 @@ class WorkflowGui:
     """
 
     def __init__(self):
-        self._status_topic = rospy.get_param(
+        self._status_topic = get_param(
             "~status_topic",
-            rospy.get_param("~combined_workflow/status_topic", "/usb_c_insertion/combined_workflow/status"),
+            get_param("~combined_workflow/status_topic", "/usb_c_insertion/combined_workflow/status"),
         )
         self._queue = queue.Queue()
         self._rows = {}

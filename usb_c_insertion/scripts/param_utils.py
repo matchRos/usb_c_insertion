@@ -5,14 +5,74 @@ from __future__ import annotations
 import rospy
 
 
+GLOBAL_CONFIG_NAMESPACES = frozenset(
+    (
+        "frames",
+        "topics",
+        "motion",
+        "micro_motion",
+        "contact",
+        "probe",
+        "search",
+        "center_port",
+        "looming",
+        "housing_plane",
+        "align_housing_yaw",
+        "insert",
+        "verify",
+        "extract",
+        "gripper",
+        "state_machine",
+        "workflow",
+        "photo_pose",
+        "presentation_snapshots",
+        "insertion_workflow",
+        "combined_workflow",
+    )
+)
+
+
+def global_name_for_private(name: str) -> str:
+    if not str(name).startswith("~"):
+        return str(name)
+    private_tail = str(name)[1:].lstrip("/")
+    namespace = private_tail.split("/", 1)[0]
+    if namespace not in GLOBAL_CONFIG_NAMESPACES:
+        return ""
+    return "/" + private_tail
+
+
+def get_param(name: str, default=None):
+    """
+    Read package configuration from the global namespace first.
+
+    Launch files load config YAMLs globally.  Keeping this helper global-first
+    prevents stale private copies such as `/node/state_machine/foo` from
+    shadowing the single intended `/state_machine/foo` value.
+    """
+    if str(name).startswith("~"):
+        global_name = global_name_for_private(name)
+        if global_name and rospy.has_param(global_name):
+            return rospy.get_param(global_name)
+    if rospy.has_param(name):
+        return rospy.get_param(name)
+    return default
+
+
 def required_param(name: str):
+    if str(name).startswith("~"):
+        global_name = global_name_for_private(name)
+        if global_name and rospy.has_param(global_name):
+            return rospy.get_param(global_name)
     if rospy.has_param(name):
         return rospy.get_param(name)
     resolved_name = rospy.resolve_name(name)
+    global_name = global_name_for_private(name) if str(name).startswith("~") else ""
     rospy.logerr(
-        "[usb_c_insertion] event=missing_required_param param=%s resolved_param=%s",
+        "[usb_c_insertion] event=missing_required_param param=%s resolved_param=%s global_param=%s",
         name,
         resolved_name,
+        global_name,
     )
     raise RuntimeError("Missing required ROS parameter: %s (%s)" % (name, resolved_name))
 
@@ -53,4 +113,3 @@ def required_vector_param(name: str, length: int = 3):
             % (name, resolved_name, length, value)
         )
     return tuple(float(component) for component in value)
-

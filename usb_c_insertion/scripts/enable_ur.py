@@ -3,6 +3,7 @@
 import rospy
 import actionlib
 
+from param_utils import get_param
 from ur_dashboard_msgs.msg import SetModeAction, SetModeGoal, RobotMode
 from std_srvs.srv import Trigger, TriggerRequest
 from controller_manager_msgs.srv import (
@@ -16,13 +17,13 @@ from controller_manager_msgs.srv import (
 
 class UREnable:
     def __init__(self):
-        self.ur_hardware_interface_topic = rospy.get_param(
+        self.ur_hardware_interface_topic = get_param(
             '~ur_hardware_interface_topic',
             '/ur_hardware_interface'
         )
 
         # Name of the twist controller to load/start
-        self.twist_controller_name = rospy.get_param(
+        self.twist_controller_name = get_param(
             '~twist_controller_name',
             'twist_controller'
         )
@@ -36,12 +37,12 @@ class UREnable:
         }
 
         # Controller manager namespace
-        self.controller_manager_ns = rospy.get_param(
+        self.controller_manager_ns = get_param(
             '~controller_manager_ns',
             '/controller_manager'
         )
 
-        self.startup_timeout = rospy.get_param('~startup_timeout', 0.1)
+        self.startup_timeout = get_param('~startup_timeout', 0.1)
 
     def stop_dashboard_server(self):
         rospy.loginfo("Stopping dashboard server")

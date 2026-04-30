@@ -12,16 +12,17 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
+from param_utils import get_param
 from vision_pose_loader import load_vision_pose_from_json
 
 
 def main() -> None:
     rospy.init_node("usb_c_insertion_vision_pose_publisher")
 
-    json_path = str(rospy.get_param("~vision_pose_json_path", "")).strip()
-    topic = str(rospy.get_param("~topics/vision_pose_debug", "/usb_c_insertion/vision_pose_debug"))
-    base_frame = str(rospy.get_param("~frames/base_frame", "base_link"))
-    publish_rate = float(rospy.get_param("~vision_pose_publish_rate", 2.0))
+    json_path = str(get_param("~vision_pose_json_path", "")).strip()
+    topic = str(get_param("~topics/vision_pose_debug", "/usb_c_insertion/vision_pose_debug"))
+    base_frame = str(get_param("~frames/base_frame", "base_link"))
+    publish_rate = float(get_param("~vision_pose_publish_rate", 2.0))
 
     publisher = rospy.Publisher(topic, PoseStamped, queue_size=1, latch=True)
     rate = rospy.Rate(max(0.2, publish_rate))

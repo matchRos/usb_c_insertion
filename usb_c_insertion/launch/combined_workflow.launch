@@ -9,16 +9,13 @@
         pkg="usb_c_insertion"
         type="workflow_gui.py"
         name="usb_c_insertion_workflow_gui"
-        output="screen">
+        output="screen" clear_params="true">
     <param name="status_topic" value="/usb_c_insertion/combined_workflow/status" />
   </node>
 
   <node pkg="usb_c_insertion"
         type="combined_workflow.py"
         name="usb_c_insertion_combined_workflow"
-        output="screen">
-    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
-    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+        output="screen" clear_params="true">
   </node>
 </launch>

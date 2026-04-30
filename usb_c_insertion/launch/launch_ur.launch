@@ -25,41 +25,29 @@
         name="usb_c_insertion_twist_controller"
         pkg="usb_c_insertion"
         type="twist_controller_node.py"
-        output="screen">
-        <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml"/>
-        <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml"/>
-        <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml"/>
+        output="screen" clear_params="true">
     </node>
 
     <node
         name="usb_c_insertion_micro_move_action_server"
         pkg="usb_c_insertion"
         type="micro_move_action_server.py"
-        output="screen">
-        <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml"/>
-        <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml"/>
-        <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml"/>
+        output="screen" clear_params="true">
     </node>
 
     <node
         name="usb_c_insertion_pose_servo"
         pkg="usb_c_insertion"
         type="pose_servo_node.py"
-        output="screen">
-        <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml"/>
-        <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml"/>
-        <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml"/>
+        output="screen" clear_params="true">
     </node>
 
-    <node name="camera_pose_publisher" pkg="usb_c_insertion" type="camera_pose_publisher.py" output="screen">
-        <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml"/>
-        <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml"/>
+    <node name="camera_pose_publisher" pkg="usb_c_insertion" type="camera_pose_publisher.py" output="screen" clear_params="true">
         <param name="camera_frame" value="usb_c_zedm_left_camera_optical_frame"/>
-        <param name="topics/camera_pose_debug" value="/usb_c_insertion/camera_pose"/>
         <param name="camera_pose_publish_rate" value="10.0"/>
     </node>
 
-    <node name="enable_ur" pkg="usb_c_insertion" type="enable_ur.py" output="screen">
+    <node name="enable_ur" pkg="usb_c_insertion" type="enable_ur.py" output="screen" clear_params="true">
         <param name="startup_timeout" value="10.0"/>
     </node>
 

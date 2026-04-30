@@ -3,17 +3,25 @@
 from __future__ import annotations
 
 import math
+import os
+import sys
 
 import actionlib
 import rospy
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PACKAGE_SCRIPTS_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "..", "scripts"))
+if PACKAGE_SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, PACKAGE_SCRIPTS_DIR)
+
+from param_utils import get_param
 from usb_c_insertion.msg import AlignHousingYawAction, AlignHousingYawGoal
 
 
 class AlignHousingYawGoalClient:
     def __init__(self):
-        self._action_name = str(rospy.get_param("~align_housing_yaw/action_name", "align_housing_yaw")).strip()
-        self._wait_timeout = float(rospy.get_param("~align_housing_yaw/client_wait_timeout", 5.0))
+        self._action_name = str(get_param("~align_housing_yaw/action_name", "align_housing_yaw")).strip()
+        self._wait_timeout = float(get_param("~align_housing_yaw/client_wait_timeout", 5.0))
         self._client = actionlib.SimpleActionClient(self._action_name, AlignHousingYawAction)
 
     def run(self) -> bool:
@@ -71,17 +79,17 @@ class AlignHousingYawGoalClient:
     def _build_goal(self) -> AlignHousingYawGoal:
         goal = AlignHousingYawGoal()
         goal.image_topic = str(
-            rospy.get_param("~align_housing_yaw/image_topic", rospy.get_param("~housing_plane/image_topic", ""))
+            get_param("~image_topic", get_param("~align_housing_yaw/image_topic", get_param("~housing_plane/image_topic", "")))
         ).strip()
         goal.cloud_topic = str(
-            rospy.get_param("~align_housing_yaw/cloud_topic", rospy.get_param("~housing_plane/cloud_topic", ""))
+            get_param("~cloud_topic", get_param("~align_housing_yaw/cloud_topic", get_param("~housing_plane/cloud_topic", "")))
         ).strip()
-        goal.estimate_timeout = float(rospy.get_param("~align_housing_yaw/estimate_timeout", 3.0))
-        goal.yaw_tolerance_rad = float(rospy.get_param("~align_housing_yaw/yaw_tolerance_rad", 0.0175))
-        goal.max_iterations = int(rospy.get_param("~align_housing_yaw/max_iterations", 10))
-        goal.max_yaw_step_rad = float(rospy.get_param("~align_housing_yaw/max_yaw_step_rad", 0.25))
-        goal.settle_time = float(rospy.get_param("~align_housing_yaw/settle_time", 0.15))
-        goal.move_timeout = float(rospy.get_param("~align_housing_yaw/move_timeout", 20.0))
+        goal.estimate_timeout = float(get_param("~align_housing_yaw/estimate_timeout", 3.0))
+        goal.yaw_tolerance_rad = float(get_param("~align_housing_yaw/yaw_tolerance_rad", 0.0175))
+        goal.max_iterations = int(get_param("~align_housing_yaw/max_iterations", 10))
+        goal.max_yaw_step_rad = float(get_param("~align_housing_yaw/max_yaw_step_rad", 0.25))
+        goal.settle_time = float(get_param("~align_housing_yaw/settle_time", 0.15))
+        goal.move_timeout = float(get_param("~align_housing_yaw/move_timeout", 20.0))
         return goal
 
     @staticmethod
