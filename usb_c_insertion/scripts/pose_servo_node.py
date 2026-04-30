@@ -71,7 +71,7 @@ class PoseServoNode:
                     self._last_current_pose,
                     self._last_position_error,
                     self._last_orientation_error,
-                    self._goal_reached_latched,
+                    False,
                 )
                 self._send_zero_twist_once()
                 rate.sleep()
@@ -109,7 +109,6 @@ class PoseServoNode:
                 self._goal_reached_latched = True
                 self._remember_status(current_pose, distance, orientation_error_norm)
                 self._publish_status(current_pose, distance, orientation_error_norm, True)
-                self._enabled = False
                 self._reset_position_pid()
                 self._send_zero_twist_once()
                 rate.sleep()

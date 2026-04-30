@@ -144,7 +144,9 @@ class RobotInterface:
         rate = rospy.Rate(20.0)
         while not rospy.is_shutdown():
             raw_twist_ready = self._raw_twist_publisher.get_num_connections() > 0
-            pose_ready = self._pose_target_publisher.get_num_connections() > 0
+            pose_target_ready = self._pose_target_publisher.get_num_connections() > 0
+            pose_enable_ready = self._pose_servo_enable_publisher.get_num_connections() > 0
+            pose_ready = pose_target_ready and pose_enable_ready
             if raw_twist_ready and (pose_ready or not require_pose_servo):
                 return True
             if rospy.Time.now() > deadline:

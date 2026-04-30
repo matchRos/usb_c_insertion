@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 from typing import Optional
@@ -43,6 +44,8 @@ class MoveToPoseActionServer:
         self._enforce_workspace_limits = required_bool_param("~motion/enforce_workspace_limits")
         self._min_target_x = required_float_param("~motion/min_target_x")
         self._min_target_z = required_float_param("~motion/min_target_z")
+        self._position_tolerance = required_float_param("~motion/pose_servo_position_tolerance")
+        self._orientation_tolerance = required_float_param("~motion/pose_servo_orientation_tolerance")
         self._status_topic = required_str_param("~topics/pose_servo_status")
 
         self._robot = RobotInterface()
@@ -88,6 +91,7 @@ class MoveToPoseActionServer:
         timeout = self._goal_or_default(goal.timeout, self._default_timeout)
         settle_time = self._goal_or_default(goal.settle_time, self._default_settle_time)
 
+        self._latest_status = None
         self._robot.send_pose_target(
             goal.target_pose.pose.position.x,
             goal.target_pose.pose.position.y,
@@ -115,20 +119,47 @@ class MoveToPoseActionServer:
             if status is None or status.header.stamp < goal_start_time:
                 rate.sleep()
                 continue
+            if not bool(status.enabled) or not bool(status.has_target):
+                rospy.logwarn_throttle(
+                    1.0,
+                    "[usb_c_insertion] event=move_to_pose_waiting_for_active_pose_servo "
+                    "status_enabled=%s status_has_target=%s",
+                    str(bool(status.enabled)).lower(),
+                    str(bool(status.has_target)).lower(),
+                )
+                rate.sleep()
+                continue
+
+            position_error = self._position_error(status.current_pose, goal.target_pose)
+            orientation_error = self._orientation_error(status.current_pose, goal.target_pose)
+            reached_position = position_error <= self._position_tolerance
+            reached_orientation = orientation_error <= self._orientation_tolerance
+            if bool(status.goal_reached) and not (reached_position and reached_orientation):
+                rospy.logwarn_throttle(
+                    1.0,
+                    "[usb_c_insertion] event=move_to_pose_ignored_goal_reached_status "
+                    "position_error=%.5f position_tolerance=%.5f "
+                    "orientation_error_rad=%.5f orientation_tolerance_rad=%.5f",
+                    position_error,
+                    self._position_tolerance,
+                    orientation_error,
+                    self._orientation_tolerance,
+                )
 
             feedback = MoveToPoseFeedback()
             feedback.current_pose = status.current_pose
-            feedback.position_error = status.position_error
-            feedback.orientation_error = status.orientation_error
-            feedback.reached_position = bool(status.goal_reached)
-            feedback.reached_orientation = bool(status.goal_reached)
+            feedback.position_error = position_error
+            feedback.orientation_error = orientation_error
+            feedback.reached_position = bool(reached_position)
+            feedback.reached_orientation = bool(reached_orientation)
             self._server.publish_feedback(feedback)
 
-            if bool(status.goal_reached):
+            if reached_position and reached_orientation:
                 if settled_since is None:
                     settled_since = rospy.Time.now()
                 elif (rospy.Time.now() - settled_since).to_sec() >= settle_time:
                     self._robot.enable_pose_servo(False)
+                    self._log_completion(True, "target_reached", status, goal.target_pose)
                     self._server.set_succeeded(
                         self._make_result(True, "target_reached", "", status.current_pose)
                     )
@@ -138,6 +169,7 @@ class MoveToPoseActionServer:
 
             if rospy.Time.now() >= deadline:
                 self._robot.stop_motion()
+                self._log_completion(False, "move_to_pose_timeout", status, goal.target_pose)
                 self._set_aborted(
                     "move_to_pose_timeout",
                     status.current_pose if status is not None else None,
@@ -153,6 +185,109 @@ class MoveToPoseActionServer:
 
     def _status_callback(self, msg: PoseServoStatus) -> None:
         self._latest_status = msg
+
+    @staticmethod
+    def _position_error(current_pose: PoseStamped, target_pose: PoseStamped) -> float:
+        dx = target_pose.pose.position.x - current_pose.pose.position.x
+        dy = target_pose.pose.position.y - current_pose.pose.position.y
+        dz = target_pose.pose.position.z - current_pose.pose.position.z
+        return math.sqrt(dx * dx + dy * dy + dz * dz)
+
+    @staticmethod
+    def _orientation_error(current_pose: PoseStamped, target_pose: PoseStamped) -> float:
+        current = MoveToPoseActionServer._normalize_quaternion(
+            (
+                current_pose.pose.orientation.x,
+                current_pose.pose.orientation.y,
+                current_pose.pose.orientation.z,
+                current_pose.pose.orientation.w,
+            )
+        )
+        target = MoveToPoseActionServer._normalize_quaternion(
+            (
+                target_pose.pose.orientation.x,
+                target_pose.pose.orientation.y,
+                target_pose.pose.orientation.z,
+                target_pose.pose.orientation.w,
+            )
+        )
+        error = MoveToPoseActionServer._quaternion_multiply(
+            target,
+            MoveToPoseActionServer._quaternion_conjugate(current),
+        )
+        if error[3] < 0.0:
+            error = (-error[0], -error[1], -error[2], -error[3])
+        vector_norm = math.sqrt(error[0] * error[0] + error[1] * error[1] + error[2] * error[2])
+        if vector_norm <= 1e-9:
+            return 0.0
+        return 2.0 * math.atan2(vector_norm, error[3])
+
+    @staticmethod
+    def _normalize_quaternion(quaternion_xyzw):
+        norm = math.sqrt(sum(component * component for component in quaternion_xyzw))
+        if norm <= 1e-9:
+            return (0.0, 0.0, 0.0, 1.0)
+        return tuple(component / norm for component in quaternion_xyzw)
+
+    @staticmethod
+    def _quaternion_conjugate(quaternion_xyzw):
+        return (-quaternion_xyzw[0], -quaternion_xyzw[1], -quaternion_xyzw[2], quaternion_xyzw[3])
+
+    @staticmethod
+    def _quaternion_multiply(first_xyzw, second_xyzw):
+        x1, y1, z1, w1 = first_xyzw
+        x2, y2, z2, w2 = second_xyzw
+        return (
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        )
+
+    @staticmethod
+    def _log_completion(
+        success: bool,
+        reason: str,
+        status: Optional[PoseServoStatus],
+        target_pose: PoseStamped,
+    ) -> None:
+        position_error = float("nan")
+        orientation_error = float("nan")
+        final_q = (float("nan"), float("nan"), float("nan"), float("nan"))
+        if status is not None:
+            position_error = MoveToPoseActionServer._position_error(status.current_pose, target_pose)
+            orientation_error = MoveToPoseActionServer._orientation_error(status.current_pose, target_pose)
+            final_q = (
+                status.current_pose.pose.orientation.x,
+                status.current_pose.pose.orientation.y,
+                status.current_pose.pose.orientation.z,
+                status.current_pose.pose.orientation.w,
+            )
+        target_q = (
+            target_pose.pose.orientation.x,
+            target_pose.pose.orientation.y,
+            target_pose.pose.orientation.z,
+            target_pose.pose.orientation.w,
+        )
+        log = rospy.loginfo if success else rospy.logwarn
+        log(
+            "[usb_c_insertion] event=move_to_pose_complete success=%s reason=%s "
+            "position_error=%.5f orientation_error_rad=%.5f orientation_error_deg=%.3f "
+            "target_q=(%.5f,%.5f,%.5f,%.5f) final_q=(%.5f,%.5f,%.5f,%.5f)",
+            str(bool(success)).lower(),
+            reason,
+            position_error,
+            orientation_error,
+            math.degrees(orientation_error) if math.isfinite(orientation_error) else float("nan"),
+            target_q[0],
+            target_q[1],
+            target_q[2],
+            target_q[3],
+            final_q[0],
+            final_q[1],
+            final_q[2],
+            final_q[3],
+        )
 
     @staticmethod
     def _goal_or_default(value: float, default: float) -> float:

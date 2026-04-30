@@ -22,7 +22,13 @@ from param_utils import (
     required_str_param,
     required_vector_param,
 )
-from prepose_planner import normalize_quaternion, quaternion_from_yaw, quaternion_multiply, rotate_vector_by_quaternion
+from prepose_planner import (
+    euler_from_quaternion,
+    normalize_quaternion,
+    quaternion_from_yaw,
+    quaternion_multiply,
+    rotate_vector_by_quaternion,
+)
 from tf_interface import TFInterface
 from usb_c_insertion.msg import (
     AlignHousingYawAction,
@@ -93,7 +99,7 @@ class AlignHousingYawActionServer:
 
     def _mirror_global_config_to_private_namespace(self) -> None:
         """
-        Let a manually started action server use YAML loaded globally by launch_ur.
+        Keep manually started action-server params in sync with global YAML.
         """
         namespaces = (
             "frames",
@@ -106,9 +112,12 @@ class AlignHousingYawActionServer:
         for namespace in namespaces:
             private_name = "~%s" % namespace
             global_name = "/%s" % namespace
-            if rospy.has_param(private_name) or not rospy.has_param(global_name):
+            if not rospy.has_param(global_name):
                 continue
-            rospy.set_param(private_name, rospy.get_param(global_name))
+            global_value = rospy.get_param(global_name)
+            if rospy.has_param(private_name) and rospy.get_param(private_name) == global_value:
+                continue
+            rospy.set_param(private_name, global_value)
             mirrored.append(namespace)
         if mirrored:
             rospy.loginfo(
@@ -273,6 +282,7 @@ class AlignHousingYawActionServer:
                 return
 
             yaw_command = self._limit_yaw_step(yaw_error, max_yaw_step_rad)
+            target_pose = self._build_yaw_target_pose(current_pose, yaw_command)
             self._publish_feedback(
                 "move_to_corrected_yaw",
                 correction_count + 1,
@@ -281,7 +291,7 @@ class AlignHousingYawActionServer:
                 total_yaw_command + yaw_command,
                 plane_result,
             )
-            move_result = self._move_by_yaw(current_pose, yaw_command, settle_time, move_timeout)
+            move_result = self._move_to_pose(target_pose, settle_time, move_timeout)
             if move_result is None or not bool(move_result.success):
                 message = move_result.message if move_result is not None else "no_move_result"
                 error_code = move_result.error_code if move_result is not None else "move_failed"
@@ -298,6 +308,15 @@ class AlignHousingYawActionServer:
                 )
                 return
 
+            self._log_yaw_step_motion(
+                correction_count + 1,
+                current_pose,
+                target_pose,
+                move_result.final_pose,
+                plane_result.plane_normal_base,
+                yaw_error,
+                yaw_command,
+            )
             correction_count += 1
             total_yaw_command += yaw_command
             final_pose = move_result.final_pose
@@ -323,9 +342,9 @@ class AlignHousingYawActionServer:
             return None
         return self._estimate_client.get_result()
 
-    def _move_by_yaw(self, current_pose: PoseStamped, yaw_command: float, settle_time: float, timeout: float):
+    def _move_to_pose(self, target_pose: PoseStamped, settle_time: float, timeout: float):
         move_goal = MoveToPoseGoal()
-        move_goal.target_pose = self._build_yaw_target_pose(current_pose, yaw_command)
+        move_goal.target_pose = target_pose
         move_goal.settle_time = float(settle_time)
         move_goal.timeout = float(timeout)
         self._move_client.send_goal(move_goal)
@@ -353,6 +372,84 @@ class AlignHousingYawActionServer:
         target_pose.pose.orientation.z = target_quaternion[2]
         target_pose.pose.orientation.w = target_quaternion[3]
         return target_pose
+
+    def _log_yaw_step_motion(
+        self,
+        iteration: int,
+        before_pose: PoseStamped,
+        target_pose: PoseStamped,
+        after_pose: PoseStamped,
+        plane_normal_base: Vector3,
+        yaw_error: float,
+        yaw_command: float,
+    ) -> None:
+        before_error = yaw_error
+        target_error = self._compute_yaw_error(target_pose, plane_normal_base)
+        after_error = self._compute_yaw_error(after_pose, plane_normal_base)
+        before_axis_xy = self._tool_axis_xy(before_pose)
+        target_axis_xy = self._tool_axis_xy(target_pose)
+        after_axis_xy = self._tool_axis_xy(after_pose)
+        target_normal_xy = self._target_axis_xy(plane_normal_base)
+        commanded_axis_delta = self._signed_xy_angle(before_axis_xy, target_axis_xy)
+        actual_axis_delta = self._signed_xy_angle(before_axis_xy, after_axis_xy)
+        before_q = self._pose_quaternion(before_pose)
+        target_q = self._pose_quaternion(target_pose)
+        after_q = self._pose_quaternion(after_pose)
+        before_rpy = euler_from_quaternion(before_q)
+        target_rpy = euler_from_quaternion(target_q)
+        after_rpy = euler_from_quaternion(after_q)
+
+        rospy.loginfo(
+            "[usb_c_insertion] event=align_housing_yaw_step_motion iteration=%d "
+            "commanded_yaw_deg=%.3f commanded_axis_delta_deg=%.3f actual_axis_delta_deg=%.3f "
+            "before_error_deg=%.3f target_error_deg=%.3f after_error_deg=%.3f "
+            "target_normal_xy=(%.4f,%.4f) before_tool_xy=(%.4f,%.4f) "
+            "target_tool_xy=(%.4f,%.4f) after_tool_xy=(%.4f,%.4f)",
+            int(iteration),
+            math.degrees(yaw_command),
+            self._degrees_or_nan(commanded_axis_delta),
+            self._degrees_or_nan(actual_axis_delta),
+            math.degrees(before_error),
+            self._degrees_or_nan(target_error),
+            self._degrees_or_nan(after_error),
+            self._component_or_nan(target_normal_xy, 0),
+            self._component_or_nan(target_normal_xy, 1),
+            self._component_or_nan(before_axis_xy, 0),
+            self._component_or_nan(before_axis_xy, 1),
+            self._component_or_nan(target_axis_xy, 0),
+            self._component_or_nan(target_axis_xy, 1),
+            self._component_or_nan(after_axis_xy, 0),
+            self._component_or_nan(after_axis_xy, 1),
+        )
+        rospy.loginfo(
+            "[usb_c_insertion] event=align_housing_yaw_step_orientation iteration=%d "
+            "before_rpy_deg=(%.3f,%.3f,%.3f) target_rpy_deg=(%.3f,%.3f,%.3f) "
+            "after_rpy_deg=(%.3f,%.3f,%.3f) "
+            "before_q=(%.5f,%.5f,%.5f,%.5f) target_q=(%.5f,%.5f,%.5f,%.5f) "
+            "after_q=(%.5f,%.5f,%.5f,%.5f)",
+            int(iteration),
+            math.degrees(before_rpy[0]),
+            math.degrees(before_rpy[1]),
+            math.degrees(before_rpy[2]),
+            math.degrees(target_rpy[0]),
+            math.degrees(target_rpy[1]),
+            math.degrees(target_rpy[2]),
+            math.degrees(after_rpy[0]),
+            math.degrees(after_rpy[1]),
+            math.degrees(after_rpy[2]),
+            before_q[0],
+            before_q[1],
+            before_q[2],
+            before_q[3],
+            target_q[0],
+            target_q[1],
+            target_q[2],
+            target_q[3],
+            after_q[0],
+            after_q[1],
+            after_q[2],
+            after_q[3],
+        )
 
     def _compute_yaw_error(self, current_pose: PoseStamped, plane_normal_base: Vector3) -> Optional[float]:
         current_quaternion = (
@@ -382,6 +479,27 @@ class AlignHousingYawActionServer:
         cross_z = current_xy[0] * target_xy[1] - current_xy[1] * target_xy[0]
         dot = current_xy[0] * target_xy[0] + current_xy[1] * target_xy[1]
         return math.atan2(cross_z, dot)
+
+    def _tool_axis_xy(self, pose: PoseStamped) -> Optional[Tuple[float, float]]:
+        qx, qy, qz, qw = self._pose_quaternion(pose)
+        axis = rotate_vector_by_quaternion(
+            self._tool_axis[0],
+            self._tool_axis[1],
+            self._tool_axis[2],
+            qx,
+            qy,
+            qz,
+            qw,
+        )
+        return self._normalize_xy((axis[0], axis[1]))
+
+    def _target_axis_xy(self, plane_normal_base: Vector3) -> Optional[Tuple[float, float]]:
+        return self._normalize_xy(
+            (
+                self._target_axis_from_plane_normal_sign * float(plane_normal_base.x),
+                self._target_axis_from_plane_normal_sign * float(plane_normal_base.y),
+            )
+        )
 
     def _publish_feedback(
         self,
@@ -491,6 +609,34 @@ class AlignHousingYawActionServer:
         if norm <= 1e-6:
             return None
         return vector_xy[0] / norm, vector_xy[1] / norm
+
+    @staticmethod
+    def _signed_xy_angle(
+        from_xy: Optional[Tuple[float, float]],
+        to_xy: Optional[Tuple[float, float]],
+    ) -> Optional[float]:
+        if from_xy is None or to_xy is None:
+            return None
+        cross_z = from_xy[0] * to_xy[1] - from_xy[1] * to_xy[0]
+        dot = from_xy[0] * to_xy[0] + from_xy[1] * to_xy[1]
+        return math.atan2(cross_z, dot)
+
+    @staticmethod
+    def _pose_quaternion(pose: PoseStamped) -> Tuple[float, float, float, float]:
+        return (
+            pose.pose.orientation.x,
+            pose.pose.orientation.y,
+            pose.pose.orientation.z,
+            pose.pose.orientation.w,
+        )
+
+    @staticmethod
+    def _degrees_or_nan(value: Optional[float]) -> float:
+        return math.degrees(value) if value is not None else float("nan")
+
+    @staticmethod
+    def _component_or_nan(vector, index: int) -> float:
+        return float(vector[index]) if vector is not None else float("nan")
 
     @staticmethod
     def _goal_or_default(value: float, default: float) -> float:
