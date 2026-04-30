@@ -19,6 +19,7 @@ from extraction_controller import ExtractionController
 from ft_interface import FTInterface
 from insertion_workflow import InsertionWorkflow
 from param_utils import required_bool_param, required_float_param, required_int_param, required_str_param
+from presentation_snapshot_recorder import PresentationSnapshotRecorder
 from preinsert_workflow_helpers import PreinsertWorkflowHelpers
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
@@ -100,6 +101,7 @@ class CombinedInsertionWorkflow:
 
         self._status = WorkflowStatusPublisher(self._status_topic)
         self._helpers: Optional[PreinsertWorkflowHelpers] = None
+        self._snapshots: Optional[PresentationSnapshotRecorder] = None
         self._tf = TFInterface()
         self._overview_pose: Optional[PoseStamped] = None
         self._updated_port_pose_publisher = None
@@ -124,6 +126,7 @@ class CombinedInsertionWorkflow:
             "state_machine",
             "workflow",
             "photo_pose",
+            "presentation_snapshots",
             "insertion_workflow",
             "combined_workflow",
         )
@@ -176,6 +179,7 @@ class CombinedInsertionWorkflow:
 
     def _run_preinsert_alignment(self) -> bool:
         self._helpers = PreinsertWorkflowHelpers()
+        self._snapshots = PresentationSnapshotRecorder()
         updated_topic = self._helpers._required_str_param("~workflow/updated_port_pose_topic")
         self._updated_port_pose_publisher = rospy.Publisher(updated_topic, PoseStamped, queue_size=1, latch=True)
 
@@ -200,6 +204,11 @@ class CombinedInsertionWorkflow:
         coarse_port_pose = self._helpers.run_overview_vision()
         if coarse_port_pose is None:
             return self._fail("overview_vision", "vision_failed")
+        self._snapshots.capture_port_pose_axes(
+            "01_overview_initial_port_estimate.png",
+            "01 Overview position",
+            coarse_port_pose,
+        )
         self._status.publish(
             "overview_vision",
             "success",
@@ -222,6 +231,10 @@ class CombinedInsertionWorkflow:
         camera_final = self._helpers.move_to_pose(camera_pose, "camera_to_coarse_port")
         if camera_final is None:
             return self._fail("move_camera_pose", "move_failed")
+        self._snapshots.capture_current_view(
+            "02_camera_at_initial_estimate.png",
+            "02 Camera at initial estimate",
+        )
         self._status.publish(
             "move_camera_pose",
             "success",
@@ -232,6 +245,10 @@ class CombinedInsertionWorkflow:
         self._status.publish("align_housing_yaw", "running")
         if not self._helpers.align_housing_yaw():
             return self._fail("align_housing_yaw", "align_failed")
+        self._snapshots.capture_marker_alignment(
+            "03_after_yaw_alignment_before_centering.png",
+            "03 After yaw alignment",
+        )
         align_result = self._helpers._align_client.get_result()
         self._status.publish(
             "align_housing_yaw",
@@ -245,6 +262,11 @@ class CombinedInsertionWorkflow:
         if centered_pose is None:
             return self._fail("center_port", "center_failed")
         center_result = self._helpers._center_client.get_result()
+        self._snapshots.capture_marker_alignment(
+            "04_centered_over_port.png",
+            "04 Camera over circle center",
+            fallback_marker_center=PresentationSnapshotRecorder.center_from_center_result(center_result),
+        )
         self._status.publish(
             "center_port",
             "success",
@@ -269,6 +291,17 @@ class CombinedInsertionWorkflow:
         looming_result = self._helpers.verify_looming()
         if looming_result is None:
             return self._fail("verify_looming", "looming_failed")
+        recenter_ok, recenter_result = self._helpers.recenter_after_looming_if_needed(looming_result)
+        if not recenter_ok:
+            return self._fail("verify_looming", "looming_recenter_failed")
+        marker_center = PresentationSnapshotRecorder.center_from_center_result(recenter_result)
+        if marker_center is None:
+            marker_center = PresentationSnapshotRecorder.center_from_looming_result(looming_result)
+        self._snapshots.capture_marker_alignment(
+            "05_after_verify_looming.png",
+            "05 After looming verification",
+            fallback_marker_center=marker_center,
+        )
         self._status.publish(
             "verify_looming",
             "success",

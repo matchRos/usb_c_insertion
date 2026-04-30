@@ -88,6 +88,7 @@ class PreinsertWorkflowHelpers:
         self._center_client = actionlib.SimpleActionClient(self._center_action_name, CenterPortInImageAction)
         self._estimate_client = actionlib.SimpleActionClient(self._estimate_action_name, EstimateHousingPlaneAction)
         self._looming_client = actionlib.SimpleActionClient(self._looming_action_name, VerifyLoomingAction)
+        self._last_center_port_result = None
 
     def _mirror_global_config_to_private_namespace(self) -> None:
         """
@@ -117,6 +118,7 @@ class PreinsertWorkflowHelpers:
             "state_machine",
             "workflow",
             "photo_pose",
+            "presentation_snapshots",
         )
         mirrored = []
         for namespace in namespaces:
@@ -390,6 +392,7 @@ class PreinsertWorkflowHelpers:
             rospy.logerr("[usb_c_insertion] event=preinsert_workflow_failed reason=center_port_timeout")
             return None
         result = self._center_client.get_result()
+        self._last_center_port_result = result
         if result is None or not bool(result.success):
             message = result.message if result is not None else "no_result"
             error_code = result.error_code if result is not None else "center_no_result"
@@ -406,6 +409,9 @@ class PreinsertWorkflowHelpers:
             result.blob_center_y,
         )
         return result.final_pose
+
+    def latest_center_port_result(self):
+        return self._last_center_port_result
 
     def estimate_housing_plane(self, label: str):
         goal = self._build_estimate_goal()
@@ -474,6 +480,53 @@ class PreinsertWorkflowHelpers:
             result.traveled_distance,
         )
         return result
+
+    def recenter_after_looming_if_needed(self, looming_result) -> Tuple[bool, Optional[object]]:
+        if not self._required_bool_param("~workflow/looming_recenter_enabled"):
+            return True, None
+
+        center_shift_px = float(getattr(looming_result, "center_shift_px", 0.0))
+        min_shift_px = max(0.0, self._required_float_param("~workflow/looming_recenter_min_shift_px"))
+        if center_shift_px < min_shift_px:
+            rospy.loginfo(
+                "[usb_c_insertion] event=preinsert_looming_recenter_skipped center_shift_px=%.2f min_shift_px=%.2f",
+                center_shift_px,
+                min_shift_px,
+            )
+            return True, None
+
+        max_attempts = max(1, self._required_int_param("~workflow/looming_recenter_max_attempts"))
+        required = self._required_bool_param("~workflow/looming_recenter_required")
+        rospy.loginfo(
+            "[usb_c_insertion] event=preinsert_looming_recenter_started center_shift_px=%.2f min_shift_px=%.2f max_attempts=%d",
+            center_shift_px,
+            min_shift_px,
+            max_attempts,
+        )
+
+        for attempt in range(1, max_attempts + 1):
+            final_pose = self.center_port_in_image()
+            center_result = self.latest_center_port_result()
+            if final_pose is not None and center_result is not None and bool(center_result.success):
+                rospy.loginfo(
+                    "[usb_c_insertion] event=preinsert_looming_recenter_complete attempt=%d error_norm=%.2f blob=(%.1f,%.1f)",
+                    attempt,
+                    center_result.error_norm,
+                    center_result.blob_center_x,
+                    center_result.blob_center_y,
+                )
+                return True, center_result
+            rospy.logwarn(
+                "[usb_c_insertion] event=preinsert_looming_recenter_attempt_failed attempt=%d",
+                attempt,
+            )
+
+        if required:
+            rospy.logerr("[usb_c_insertion] event=preinsert_workflow_failed reason=looming_recenter_failed")
+            return False, None
+
+        rospy.logwarn("[usb_c_insertion] event=preinsert_looming_recenter_failed continuing=true")
+        return True, None
 
     def validate_plane_quality(self, plane_result, label: str) -> bool:
         min_ratio = self._required_float_param("~workflow/min_plane_inlier_ratio")

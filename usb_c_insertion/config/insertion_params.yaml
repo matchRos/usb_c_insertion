@@ -254,7 +254,12 @@ insertion_workflow:
   search_probe_timeout: 2.5
   search_probe_max_travel: 0.0035
   search_contact_force_target: 1.5
-  search_contact_force_abort_threshold: 5.0
+  search_center_first_probe: true
+  search_center_first_contact_force_target: 5.0
+  search_center_first_probe_timeout: 3.5
+  search_center_first_probe_max_travel: 0.006
+  search_center_first_min_probe_time: 0.6
+  search_contact_force_abort_threshold: 10.0
   search_socket_depth_threshold: 0.002
   search_candidate_pull_verify: false
   search_candidate_lateral_verify: false
@@ -278,20 +283,20 @@ extract:
   distance: 0.03
   pull_force_target: 8.0
   pull_force_tolerance: 1.0
-  pull_force_gain: 0.003
+  pull_force_gain: 0.004
   max_pull_speed: 0.006
   pulsed_enabled: true
   pulse_pull_duration: 0.22
   pulse_rest_duration: 0.18
   pulse_min_pull_speed: 0.004
-  pulse_pull_force_target: 12.0
+  pulse_pull_force_target: 30.0
   tool_z_direction_sign: -1.0
   wiggle_speed_y: 0.002
   wiggle_speed_z: 0.0
   wiggle_frequency: 2.0
   timeout: 10.0
-  max_lateral_force: 25.0
-  max_torque_norm: 5.0
+  max_lateral_force: 35.0
+  max_torque_norm: 6.0
   release_after_extract: true
 
 gripper:
@@ -314,10 +319,24 @@ photo_pose:
   timeout: 20.0
   require_fresh_vision_result: true
 
+presentation_snapshots:
+  enabled: true
+  output_dir: "/tmp/usb_c_insertion_presentation_snapshots"
+  image_topic: "/zedm/zed_node/left/image_rect_color"
+  camera_info_topic: "/zedm/zed_node/left/camera_info"
+  camera_frame: "usb_c_zedm_left_camera_optical_frame"
+  image_rotation_deg: 180.0
+  wait_timeout: 1.0
+  pose_axis_length: 0.025
+  min_blob_area: 120.0
+  hsv_lower: [35, 70, 40]
+  hsv_upper: [90, 255, 255]
+  morph_kernel_size: 5
+
 state_machine:
   auto_zero_ft: true
   target_offset_tool_x: +0.0
-  target_offset_tool_y: +0.0
+  target_offset_tool_y: -0.002
   prepose_offset: -0.01
   precontact_offset_tool_x: -0.000
   precontact_offset_tool_y: 0.000
@@ -340,6 +359,10 @@ workflow:
   updated_port_pose_topic: "/usb_c_insertion/updated_port_pose"
   min_plane_inlier_ratio: 0.80
   max_plane_rms_error: 0.004
+  looming_recenter_enabled: true
+  looming_recenter_min_shift_px: 2.0
+  looming_recenter_max_attempts: 1
+  looming_recenter_required: false
   photo_pose_max_linear_speed: 0.12
   photo_pose_max_angular_speed: 0.35
   prepose_max_linear_speed: 0.10

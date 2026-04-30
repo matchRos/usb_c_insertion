@@ -148,6 +148,22 @@ class InsertionWorkflow:
         self._search_contact_force_target = required_float_param(
             "~insertion_workflow/search_contact_force_target"
         )
+        self._search_center_first_probe = required_bool_param(
+            "~insertion_workflow/search_center_first_probe"
+        )
+        self._search_center_first_contact_force_target = required_float_param(
+            "~insertion_workflow/search_center_first_contact_force_target"
+        )
+        self._search_center_first_probe_timeout = required_float_param(
+            "~insertion_workflow/search_center_first_probe_timeout"
+        )
+        self._search_center_first_probe_max_travel = required_float_param(
+            "~insertion_workflow/search_center_first_probe_max_travel"
+        )
+        self._search_center_first_min_probe_time = max(
+            0.0,
+            required_float_param("~insertion_workflow/search_center_first_min_probe_time"),
+        )
         self._search_contact_force_abort_threshold = required_float_param(
             "~insertion_workflow/search_contact_force_abort_threshold"
         )
@@ -515,7 +531,8 @@ class InsertionWorkflow:
         except ValueError as exc:
             return SpiralSearchResult(False, "search_geometry_failed: %s" % exc, "spiral_search", 0, 0, 0.0, 0.0)
 
-        total_steps = len(pattern)
+        pattern_steps = len(pattern)
+        total_steps = pattern_steps + (1 if self._search_center_first_probe else 0)
         if total_steps <= 0:
             return SpiralSearchResult(False, "empty_search_pattern", "spiral_search", 0, 0, 0.0, 0.0)
 
@@ -526,19 +543,88 @@ class InsertionWorkflow:
         last_contact_force = 0.0
 
         rospy.loginfo(
-            "[usb_c_insertion] event=insertion_spiral_search_start steps=%d step_tool_x=%.4f step_base_z=%.4f width_tool_x=%.4f height_base_z=%.4f contact_force_target=%.3f probe_speed_limit=%.4f socket_depth_threshold=%.4f",
+            "[usb_c_insertion] event=insertion_spiral_search_start steps=%d center_first=%s step_tool_x=%.4f step_base_z=%.4f width_tool_x=%.4f height_base_z=%.4f contact_force_target=%.3f center_first_contact_force_target=%.3f center_first_min_probe_time=%.2f probe_speed_limit=%.4f socket_depth_threshold=%.4f",
             total_steps,
+            str(self._search_center_first_probe).lower(),
             self._search_step_tool_x,
             self._search_step_base_z,
             self._search_width_tool_x,
             self._search_height_base_z,
             self._search_contact_force_target,
+            self._search_center_first_contact_force_target,
+            self._search_center_first_min_probe_time,
             self._search_probe_speed_limit,
             self._search_socket_depth_threshold,
         )
 
-        for step_index, offset in enumerate(pattern, start=1):
-            completed_steps = step_index
+        if self._search_center_first_probe:
+            completed_steps = 1
+            pre_probe_xyz = self._offset_xyz(surface_xyz, probe_direction, -self._search_pre_probe_clearance)
+            pre_probe_pose = self._make_pose_like(contact_pose, pre_probe_xyz)
+            if not self._move_to_pose(
+                pre_probe_pose,
+                "spiral_search_center_pre_probe",
+                self._search_transfer_timeout,
+            ):
+                return SpiralSearchResult(
+                    False,
+                    "search_transfer_to_center_pre_probe_failed",
+                    "spiral_search",
+                    completed_steps,
+                    total_steps,
+                    last_inserted_depth,
+                    last_contact_force,
+                )
+            rospy.sleep(self._search_pre_probe_settle_time)
+
+            probe = self._probe_search_position(
+                surface_xyz,
+                probe_direction,
+                completed_steps,
+                total_steps,
+                center_first=True,
+            )
+            last_inserted_depth = probe.inserted_depth
+            last_contact_force = probe.max_contact_force
+            if not probe.success:
+                return SpiralSearchResult(
+                    False,
+                    probe.reason,
+                    "spiral_search",
+                    completed_steps,
+                    total_steps,
+                    probe.inserted_depth,
+                    probe.max_contact_force,
+                )
+
+            candidate_result = self._candidate_search_result(
+                surface_xyz,
+                probe_direction,
+                probe,
+                completed_steps,
+                total_steps,
+            )
+            if candidate_result is not None:
+                return candidate_result
+
+            if not self._move_to_pose(
+                pre_probe_pose,
+                "spiral_search_center_retract",
+                self._search_transfer_timeout,
+            ):
+                return SpiralSearchResult(
+                    False,
+                    "search_retract_after_center_probe_failed",
+                    "spiral_search",
+                    completed_steps,
+                    total_steps,
+                    last_inserted_depth,
+                    last_contact_force,
+                )
+
+        step_offset = 1 if self._search_center_first_probe else 0
+        for pattern_index, offset in enumerate(pattern, start=1):
+            completed_steps = pattern_index + step_offset
             if rospy.is_shutdown():
                 return SpiralSearchResult(
                     False,
@@ -570,7 +656,7 @@ class InsertionWorkflow:
 
             if not self._move_to_pose(
                 pre_probe_pose,
-                "spiral_search_pre_probe_%d" % step_index,
+                "spiral_search_pre_probe_%d" % completed_steps,
                 self._search_transfer_timeout,
             ):
                 return SpiralSearchResult(
@@ -584,7 +670,7 @@ class InsertionWorkflow:
                 )
             rospy.sleep(self._search_pre_probe_settle_time)
 
-            probe = self._probe_search_position(surface_xyz, probe_direction, step_index, total_steps)
+            probe = self._probe_search_position(surface_xyz, probe_direction, completed_steps, total_steps)
             last_inserted_depth = probe.inserted_depth
             last_contact_force = probe.max_contact_force
             if not probe.success:
@@ -598,46 +684,19 @@ class InsertionWorkflow:
                     probe.max_contact_force,
                 )
 
-            if probe.candidate_found:
-                if probe.final_pose is None:
-                    return SpiralSearchResult(
-                        False,
-                        "candidate_missing_final_pose",
-                        "spiral_search",
-                        completed_steps,
-                        total_steps,
-                        probe.inserted_depth,
-                        probe.max_contact_force,
-                    )
-                verified, method_or_reason = self._verify_search_candidate(
-                    surface_xyz,
-                    probe_direction,
-                    probe.final_pose,
-                )
-                if verified:
-                    return SpiralSearchResult(
-                        True,
-                        "candidate_verified",
-                        method_or_reason,
-                        completed_steps,
-                        total_steps,
-                        probe.inserted_depth,
-                        probe.max_contact_force,
-                    )
-                if not self._search_continue_after_unverified_candidate:
-                    return SpiralSearchResult(
-                        False,
-                        method_or_reason,
-                        "spiral_search",
-                        completed_steps,
-                        total_steps,
-                        probe.inserted_depth,
-                        probe.max_contact_force,
-                    )
+            candidate_result = self._candidate_search_result(
+                surface_xyz,
+                probe_direction,
+                probe,
+                completed_steps,
+                total_steps,
+            )
+            if candidate_result is not None:
+                return candidate_result
 
             if not self._move_to_pose(
                 pre_probe_pose,
-                "spiral_search_retract_%d" % step_index,
+                "spiral_search_retract_%d" % completed_steps,
                 self._search_transfer_timeout,
             ):
                 return SpiralSearchResult(
@@ -666,6 +725,7 @@ class InsertionWorkflow:
         probe_direction_xyz,
         step_index: int,
         total_steps: int,
+        center_first: bool = False,
     ) -> SearchProbeResult:
         direction = self._normalize_vector(probe_direction_xyz)
         start_pose = self._tf.get_tool_pose_in_base()
@@ -677,7 +737,17 @@ class InsertionWorkflow:
             return SearchProbeResult(False, "invalid_search_probe_speed", False, start_pose, 0.0, 0.0, 0.0, 0.0)
 
         start_xyz = self._pose_xyz(start_pose)
-        deadline = rospy.Time.now() + rospy.Duration.from_sec(max(0.1, self._search_probe_timeout))
+        contact_force_target = self._search_contact_force_target
+        probe_timeout = self._search_probe_timeout
+        probe_max_travel = self._search_probe_max_travel
+        if center_first:
+            contact_force_target = max(contact_force_target, self._search_center_first_contact_force_target)
+            probe_timeout = max(probe_timeout, self._search_center_first_probe_timeout)
+            probe_max_travel = max(probe_max_travel, self._search_center_first_probe_max_travel)
+        min_probe_time = self._search_center_first_min_probe_time if center_first else 0.0
+
+        deadline = rospy.Time.now() + rospy.Duration.from_sec(max(0.1, probe_timeout))
+        probe_start_time = rospy.Time.now()
         rate = rospy.Rate(max(1.0, self._command_rate))
         max_contact_force = 0.0
         last_inserted_depth = 0.0
@@ -685,15 +755,19 @@ class InsertionWorkflow:
         self._contact_detector.update_baseline()
 
         rospy.loginfo(
-            "[usb_c_insertion] event=insertion_spiral_probe_start step=%d total=%d surface=(%.4f,%.4f,%.4f) direction=(%.4f,%.4f,%.4f)",
+            "[usb_c_insertion] event=insertion_spiral_probe_start step=%d total=%d center_first=%s surface=(%.4f,%.4f,%.4f) direction=(%.4f,%.4f,%.4f) contact_force_target=%.3f timeout=%.2f max_travel=%.4f",
             step_index,
             total_steps,
+            str(center_first).lower(),
             surface_xyz[0],
             surface_xyz[1],
             surface_xyz[2],
             direction[0],
             direction[1],
             direction[2],
+            contact_force_target,
+            probe_timeout,
+            probe_max_travel,
         )
         self._begin_direct_probe_control()
         try:
@@ -735,6 +809,7 @@ class InsertionWorkflow:
                     )
 
                 current_xyz = self._pose_xyz(pose)
+                elapsed = (rospy.Time.now() - probe_start_time).to_sec()
                 contact_force = self._contact_detector.get_contact_force_along_direction(direction)
                 inserted_depth = self._project_xyz_displacement(surface_xyz, current_xyz, direction)
                 travel = self._project_xyz_displacement(start_xyz, current_xyz, direction)
@@ -788,29 +863,43 @@ class InsertionWorkflow:
                         travel,
                     )
 
-                if contact_force >= self._search_contact_force_target:
-                    rospy.loginfo(
-                        "[usb_c_insertion] event=insertion_spiral_wall_contact step=%d total=%d inserted_depth=%.4f contact_force=%.3f target=%.3f max_contact_force=%.3f travel=%.4f",
-                        step_index,
-                        total_steps,
-                        inserted_depth,
-                        contact_force,
-                        self._search_contact_force_target,
-                        max_contact_force,
-                        travel,
-                    )
-                    return SearchProbeResult(
-                        True,
-                        "wall_contact_reached",
-                        False,
-                        pose,
-                        inserted_depth,
-                        contact_force,
-                        max_contact_force,
-                        travel,
-                    )
+                if contact_force >= contact_force_target:
+                    if elapsed < min_probe_time:
+                        rospy.loginfo_throttle(
+                            0.5,
+                            "[usb_c_insertion] event=insertion_spiral_center_probe_hold step=%d total=%d elapsed=%.2f min_time=%.2f contact_force=%.3f target=%.3f inserted_depth=%.4f travel=%.4f",
+                            step_index,
+                            total_steps,
+                            elapsed,
+                            min_probe_time,
+                            contact_force,
+                            contact_force_target,
+                            inserted_depth,
+                            travel,
+                        )
+                    else:
+                        rospy.loginfo(
+                            "[usb_c_insertion] event=insertion_spiral_wall_contact step=%d total=%d inserted_depth=%.4f contact_force=%.3f target=%.3f max_contact_force=%.3f travel=%.4f",
+                            step_index,
+                            total_steps,
+                            inserted_depth,
+                            contact_force,
+                            contact_force_target,
+                            max_contact_force,
+                            travel,
+                        )
+                        return SearchProbeResult(
+                            True,
+                            "wall_contact_reached",
+                            False,
+                            pose,
+                            inserted_depth,
+                            contact_force,
+                            max_contact_force,
+                            travel,
+                        )
 
-                if travel >= self._search_probe_max_travel:
+                if travel >= probe_max_travel:
                     return SearchProbeResult(
                         False,
                         "search_probe_max_travel_reached",
@@ -822,7 +911,7 @@ class InsertionWorkflow:
                         travel,
                     )
 
-                speed = self._search_probe_speed_for_force(contact_force)
+                speed = self._search_probe_speed_for_force(contact_force, contact_force_target)
                 self._publish_direct_twist(
                     direction[0] * speed,
                     direction[1] * speed,
@@ -836,7 +925,7 @@ class InsertionWorkflow:
                     inserted_depth,
                     self._search_socket_depth_threshold,
                     contact_force,
-                    self._search_contact_force_target,
+                    contact_force_target,
                     max_contact_force,
                     travel,
                     speed,
@@ -855,6 +944,54 @@ class InsertionWorkflow:
             max_contact_force,
             last_travel,
         )
+
+    def _candidate_search_result(
+        self,
+        reference_surface_xyz,
+        probe_direction_xyz,
+        probe: SearchProbeResult,
+        completed_steps: int,
+        total_steps: int,
+    ) -> Optional[SpiralSearchResult]:
+        if not probe.candidate_found:
+            return None
+        if probe.final_pose is None:
+            return SpiralSearchResult(
+                False,
+                "candidate_missing_final_pose",
+                "spiral_search",
+                completed_steps,
+                total_steps,
+                probe.inserted_depth,
+                probe.max_contact_force,
+            )
+
+        verified, method_or_reason = self._verify_search_candidate(
+            reference_surface_xyz,
+            probe_direction_xyz,
+            probe.final_pose,
+        )
+        if verified:
+            return SpiralSearchResult(
+                True,
+                "candidate_verified",
+                method_or_reason,
+                completed_steps,
+                total_steps,
+                probe.inserted_depth,
+                probe.max_contact_force,
+            )
+        if not self._search_continue_after_unverified_candidate:
+            return SpiralSearchResult(
+                False,
+                method_or_reason,
+                "spiral_search",
+                completed_steps,
+                total_steps,
+                probe.inserted_depth,
+                probe.max_contact_force,
+            )
+        return None
 
     def _verify_search_candidate(
         self,
@@ -929,8 +1066,8 @@ class InsertionWorkflow:
 
         return False, "spiral_search_candidate_not_verified"
 
-    def _search_probe_speed_for_force(self, contact_force: float) -> float:
-        force_error = max(0.0, self._search_contact_force_target - contact_force)
+    def _search_probe_speed_for_force(self, contact_force: float, contact_force_target: float) -> float:
+        force_error = max(0.0, contact_force_target - contact_force)
         proportional_speed = self._search_probe_force_gain * force_error
         requested_speed = min(self._search_probe_speed_limit, proportional_speed)
         if self._search_probe_min_speed > 0.0 and force_error > 0.0:

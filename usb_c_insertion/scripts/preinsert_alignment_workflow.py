@@ -13,6 +13,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from preinsert_workflow_helpers import PreinsertWorkflowHelpers
+from presentation_snapshot_recorder import PresentationSnapshotRecorder
 
 
 class PreinsertAlignmentWorkflow:
@@ -25,6 +26,7 @@ class PreinsertAlignmentWorkflow:
 
     def __init__(self):
         self._helpers = PreinsertWorkflowHelpers()
+        self._snapshots = PresentationSnapshotRecorder()
         self._updated_port_pose_topic = self._helpers._required_str_param("~workflow/updated_port_pose_topic")
         self._updated_port_pose_publisher = rospy.Publisher(
             self._updated_port_pose_topic,
@@ -46,18 +48,38 @@ class PreinsertAlignmentWorkflow:
         coarse_port_pose = self._helpers.run_overview_vision()
         if coarse_port_pose is None:
             return False
+        self._snapshots.capture_port_pose_axes(
+            "01_overview_initial_port_estimate.png",
+            "01 Overview position",
+            coarse_port_pose,
+        )
 
         camera_pose = self._helpers.plan_camera_pose_from_port(coarse_port_pose)
         if camera_pose is None:
             return False
         if self._helpers.move_to_pose(camera_pose, "camera_to_coarse_port") is None:
             return False
+        self._snapshots.capture_current_view(
+            "02_camera_at_initial_estimate.png",
+            "02 Camera at initial estimate",
+        )
 
         if not self._helpers.align_housing_yaw():
             return False
+        self._snapshots.capture_marker_alignment(
+            "03_after_yaw_alignment_before_centering.png",
+            "03 After yaw alignment",
+        )
 
         if self._helpers.center_port_in_image() is None:
             return False
+        self._snapshots.capture_marker_alignment(
+            "04_centered_over_port.png",
+            "04 Camera over circle center",
+            fallback_marker_center=PresentationSnapshotRecorder.center_from_center_result(
+                self._helpers.latest_center_port_result()
+            ),
+        )
 
         orientation_check = self._helpers.estimate_housing_plane("orientation_check")
         if orientation_check is None:
@@ -68,6 +90,17 @@ class PreinsertAlignmentWorkflow:
         looming_result = self._helpers.verify_looming()
         if looming_result is None:
             return False
+        recenter_ok, recenter_result = self._helpers.recenter_after_looming_if_needed(looming_result)
+        if not recenter_ok:
+            return False
+        marker_center = PresentationSnapshotRecorder.center_from_center_result(recenter_result)
+        if marker_center is None:
+            marker_center = PresentationSnapshotRecorder.center_from_looming_result(looming_result)
+        self._snapshots.capture_marker_alignment(
+            "05_after_verify_looming.png",
+            "05 After looming verification",
+            fallback_marker_center=marker_center,
+        )
 
         final_plane = self._helpers.estimate_housing_plane("final_depth_update")
         if final_plane is None:
