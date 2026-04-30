@@ -94,6 +94,8 @@ class InsertionWorkflow:
         self._contact_settle_time = required_float_param("~insertion_workflow/contact_settle_time")
 
         self._pull_tool_z_sign = self._sign(required_float_param("~insertion_workflow/pull_tool_z_sign"))
+        self._pull_force_mode = required_str_param("~insertion_workflow/pull_force_mode").lower()
+        self._zero_ft_before_pull = required_bool_param("~insertion_workflow/zero_ft_before_pull")
         self._pull_force_target = required_float_param("~insertion_workflow/pull_force_target")
         self._pull_force_tolerance = required_float_param("~insertion_workflow/pull_force_tolerance")
         self._pull_force_gain = required_float_param("~insertion_workflow/pull_force_gain")
@@ -109,7 +111,13 @@ class InsertionWorkflow:
         self._lateral_verify_after_failed_pull = required_bool_param(
             "~insertion_workflow/lateral_verify_after_failed_pull"
         )
+        self._zero_ft_before_lateral_verify = required_bool_param(
+            "~insertion_workflow/zero_ft_before_lateral_verify"
+        )
         self._lateral_verify_timeout = required_float_param("~insertion_workflow/lateral_verify_timeout")
+        self._verification_zero_ft_settle_time = required_float_param(
+            "~insertion_workflow/verification_zero_ft_settle_time"
+        )
 
         self._search_enabled = required_bool_param("~insertion_workflow/search_enabled")
         self._search_timeout = required_float_param("~insertion_workflow/search_timeout")
@@ -279,6 +287,8 @@ class InsertionWorkflow:
                 return False
 
         if self._lateral_verify_after_failed_pull:
+            if not self._zero_ft_for_verification_stage("lateral_after_failed_pull"):
+                return False
             lateral_result = self._post_insertion_verifier.verify_retention(
                 move_timeout=self._lateral_verify_timeout
             )
@@ -401,6 +411,10 @@ class InsertionWorkflow:
         return ContactApproachResult(False, "shutdown", None, None, max_force, 0.0)
 
     def _verify_pull_retention(self, contact_pose: PoseStamped) -> PullRetentionResult:
+        if self._zero_ft_before_pull:
+            if not self._zero_ft_for_verification_stage("pull_retention"):
+                return PullRetentionResult(False, "zero_ft_failed", 0.0, 0.0)
+
         start_pose = self._tf.get_tool_pose_in_base()
         if start_pose is None:
             self._robot.stop_motion()
@@ -415,10 +429,11 @@ class InsertionWorkflow:
         required_force = max(0.0, self._pull_force_target - self._pull_force_tolerance)
 
         rospy.loginfo(
-            "[usb_c_insertion] event=insertion_pull_retention_start direction=(%.4f,%.4f,%.4f) target_force=%.3f required_force=%.3f max_retraction=%.4f",
+            "[usb_c_insertion] event=insertion_pull_retention_start direction=(%.4f,%.4f,%.4f) force_mode=%s target_force=%.3f required_force=%.3f max_retraction=%.4f",
             pull_direction[0],
             pull_direction[1],
             pull_direction[2],
+            self._pull_force_mode,
             self._pull_force_target,
             required_force,
             self._pull_max_retraction,
@@ -436,7 +451,8 @@ class InsertionWorkflow:
                 self._robot.stop_motion()
                 return PullRetentionResult(False, "missing_tf", max_force, max_retraction)
 
-            pull_force = self._get_opposing_force_along_direction(pull_direction)
+            wrench = self._ft.get_filtered_wrench()
+            pull_force = self._get_pull_retention_force(pull_direction, wrench)
             retraction = max(0.0, self._project_pose_displacement(start_pose, pose, pull_direction))
             max_force = max(max_force, pull_force)
             max_retraction = max(max_retraction, retraction)
@@ -470,8 +486,9 @@ class InsertionWorkflow:
             )
             rospy.loginfo_throttle(
                 0.5,
-                "[usb_c_insertion] event=insertion_pull_retention_progress pull_force=%.3f target_force=%.3f required_force=%.3f retraction=%.4f max_retraction=%.4f speed=%.4f",
+                "[usb_c_insertion] event=insertion_pull_retention_progress pull_force=%.3f tool_force_z=%.3f target_force=%.3f required_force=%.3f retraction=%.4f max_retraction=%.4f speed=%.4f",
                 pull_force,
+                wrench.force_z,
                 self._pull_force_target,
                 required_force,
                 retraction,
@@ -891,6 +908,8 @@ class InsertionWorkflow:
                     self._return_timeout,
                 ):
                     return False, "spiral_search_candidate_return_after_pull_failed"
+            if not self._zero_ft_for_verification_stage("spiral_candidate_lateral"):
+                return False, "spiral_search_candidate_lateral_zero_ft_failed"
             lateral_result = self._post_insertion_verifier.verify_retention(
                 move_timeout=self._lateral_verify_timeout
             )
@@ -1001,6 +1020,24 @@ class InsertionWorkflow:
             rate.sleep()
         return False
 
+    def _zero_ft_for_verification_stage(self, stage: str) -> bool:
+        if stage.endswith("lateral") or "lateral" in stage:
+            if not self._zero_ft_before_lateral_verify:
+                return True
+        elif not self._zero_ft_before_pull:
+            return True
+
+        self._robot.stop_motion()
+        rospy.loginfo("[usb_c_insertion] event=insertion_workflow_zero_ft stage=%s", stage)
+        if not self._ft.zero_sensor():
+            rospy.logerr("[usb_c_insertion] event=insertion_workflow_zero_ft_failed stage=%s", stage)
+            return False
+        rospy.sleep(max(0.0, self._verification_zero_ft_settle_time))
+        if not self._wait_for_wrench():
+            rospy.logerr("[usb_c_insertion] event=insertion_workflow_zero_ft_failed stage=%s reason=wrench_unavailable", stage)
+            return False
+        return True
+
     @staticmethod
     def _tool_z_direction(pose: PoseStamped, sign: float) -> Tuple[float, float, float]:
         qx = pose.pose.orientation.x
@@ -1022,6 +1059,20 @@ class InsertionWorkflow:
             return InsertionWorkflow._normalize_vector(projected)
         except ValueError:
             return InsertionWorkflow._normalize_vector(tool_x)
+
+    def _get_pull_retention_force(self, pull_direction_xyz, wrench=None) -> float:
+        wrench = wrench or self._ft.get_filtered_wrench()
+        if self._pull_force_mode in ("tool_z", "tool", "sensor_z"):
+            return max(0.0, -self._pull_tool_z_sign * wrench.force_z)
+        if self._pull_force_mode in ("base_projection", "base", "projected"):
+            return self._get_opposing_force_along_direction(pull_direction_xyz)
+        rospy.logwarn_throttle(
+            2.0,
+            "[usb_c_insertion] event=insertion_pull_force_mode_unknown mode=%s fallback=tool_z",
+            self._pull_force_mode,
+        )
+        wrench = self._ft.get_filtered_wrench()
+        return max(0.0, -self._pull_tool_z_sign * wrench.force_z)
 
     def _get_opposing_force_along_direction(self, direction_xyz) -> float:
         direction = self._normalize_vector(direction_xyz)

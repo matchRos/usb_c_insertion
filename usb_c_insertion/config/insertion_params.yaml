@@ -222,6 +222,8 @@ insertion_workflow:
   approach_contact_force: 1.0
   contact_settle_time: 0.1
   pull_tool_z_sign: -1.0
+  pull_force_mode: "tool_z"
+  zero_ft_before_pull: true
   pull_force_target: 5.0
   pull_force_tolerance: 0.5
   pull_force_gain: 0.002
@@ -232,7 +234,9 @@ insertion_workflow:
   return_to_contact_after_failed_pull: true
   return_timeout: 3.0
   lateral_verify_after_failed_pull: true
+  zero_ft_before_lateral_verify: true
   lateral_verify_timeout: 2.0
+  verification_zero_ft_settle_time: 0.25
   search_enabled: true
   search_timeout: 90.0
   search_step_tool_x: 0.001
@@ -301,7 +305,7 @@ state_machine:
   prepose_offset: -0.01
   precontact_offset_tool_x: -0.000
   precontact_offset_tool_y: 0.000
-  precontact_offset_tool_z: -0.015
+  precontact_offset_tool_z: -0.016
   probe_offset_tool_x: 0.0
   probe_offset_tool_y: 0.0
   enforce_precontact_standoff: true
