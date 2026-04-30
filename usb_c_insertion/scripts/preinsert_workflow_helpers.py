@@ -48,42 +48,38 @@ class PreinsertWorkflowHelpers:
     """
 
     def __init__(self):
-        self.base_frame = str(rospy.get_param("~frames/base_frame", "base_link")).strip()
-        self.tool_frame = str(rospy.get_param("~frames/tool_frame", "tool0_controller")).strip()
+        self._mirror_global_config_to_private_namespace()
 
-        self._move_action_name = str(rospy.get_param("~move_action_name", "move_to_pose")).strip()
-        self._vision_service_name = str(rospy.get_param("~vision_service_name", "run_vision")).strip()
-        self._align_action_name = str(
-            rospy.get_param("~align_housing_yaw/action_name", "align_housing_yaw")
-        ).strip()
-        self._center_action_name = str(rospy.get_param("~center_port/action_name", "center_port_in_image")).strip()
-        self._estimate_action_name = str(
-            rospy.get_param("~housing_plane/action_name", "estimate_housing_plane")
-        ).strip()
-        self._looming_action_name = str(rospy.get_param("~looming/action_name", "verify_looming")).strip()
+        self.base_frame = self._required_str_param("~frames/base_frame")
+        self.tool_frame = self._required_str_param("~frames/tool_frame")
 
-        self._move_settle_time = float(rospy.get_param("~photo_pose/settle_time", 0.4))
-        self._move_timeout = float(rospy.get_param("~photo_pose/timeout", 20.0))
-        self._require_fresh_vision = bool(rospy.get_param("~photo_pose/require_fresh_vision_result", True))
-        self._refine_camera_frame = str(
-            rospy.get_param("~workflow/refine_camera_frame", "usb_c_zedm_left_camera_optical_frame")
-        ).strip()
-        self._refine_camera_distance = float(rospy.get_param("~workflow/refine_camera_distance", 0.18))
-        self._refine_yaw_delta_sign = float(rospy.get_param("~workflow/refine_yaw_delta_sign", 1.0))
-        self._refine_yaw_max_delta_deg = float(rospy.get_param("~workflow/refine_yaw_max_delta_deg", 45.0))
-        self._precontact_offset_tool_x = float(rospy.get_param("~state_machine/precontact_offset_tool_x", 0.0))
-        self._precontact_offset_tool_y = float(rospy.get_param("~state_machine/precontact_offset_tool_y", 0.0))
-        self._precontact_offset_tool_z = float(rospy.get_param("~state_machine/precontact_offset_tool_z", -0.010))
-        self._target_offset_tool_x = float(rospy.get_param("~state_machine/target_offset_tool_x", 0.0))
-        self._target_offset_tool_y = float(rospy.get_param("~state_machine/target_offset_tool_y", 0.0))
+        self._move_action_name = self._required_str_param("~workflow/move_action_name")
+        self._vision_service_name = self._required_str_param("~workflow/vision_service_name")
+        self._align_action_name = self._required_str_param("~align_housing_yaw/action_name")
+        self._center_action_name = self._required_str_param("~center_port/action_name")
+        self._estimate_action_name = self._required_str_param("~housing_plane/action_name")
+        self._looming_action_name = self._required_str_param("~looming/action_name")
+
+        self._move_settle_time = self._required_float_param("~photo_pose/settle_time")
+        self._move_timeout = self._required_float_param("~photo_pose/timeout")
+        self._require_fresh_vision = self._required_bool_param("~photo_pose/require_fresh_vision_result")
+        self._refine_camera_frame = self._required_str_param("~workflow/refine_camera_frame")
+        self._refine_camera_distance = self._required_float_param("~workflow/refine_camera_distance")
+        self._refine_yaw_delta_sign = self._required_float_param("~workflow/refine_yaw_delta_sign")
+        self._refine_yaw_max_delta_deg = self._required_float_param("~workflow/refine_yaw_max_delta_deg")
+        self._precontact_offset_tool_x = self._required_float_param("~state_machine/precontact_offset_tool_x")
+        self._precontact_offset_tool_y = self._required_float_param("~state_machine/precontact_offset_tool_y")
+        self._precontact_offset_tool_z = self._required_float_param("~state_machine/precontact_offset_tool_z")
+        self._target_offset_tool_x = self._required_float_param("~state_machine/target_offset_tool_x")
+        self._target_offset_tool_y = self._required_float_param("~state_machine/target_offset_tool_y")
         self._looming_tool_z_direction_sign = self._sign(
-            rospy.get_param("~looming/tool_z_direction_sign", 1.0)
+            self._required_float_param("~looming/tool_z_direction_sign")
         )
-        self._enforce_precontact_standoff = bool(
-            rospy.get_param("~state_machine/enforce_precontact_standoff", True)
+        self._enforce_precontact_standoff = self._required_bool_param(
+            "~state_machine/enforce_precontact_standoff"
         )
         self._min_precontact_standoff = abs(
-            float(rospy.get_param("~state_machine/min_precontact_standoff", 0.005))
+            self._required_float_param("~state_machine/min_precontact_standoff")
         )
 
         self._tf = TFInterface()
@@ -92,6 +88,88 @@ class PreinsertWorkflowHelpers:
         self._center_client = actionlib.SimpleActionClient(self._center_action_name, CenterPortInImageAction)
         self._estimate_client = actionlib.SimpleActionClient(self._estimate_action_name, EstimateHousingPlaneAction)
         self._looming_client = actionlib.SimpleActionClient(self._looming_action_name, VerifyLoomingAction)
+
+    def _mirror_global_config_to_private_namespace(self) -> None:
+        """
+        Let manually started workflows use YAML loaded globally by launch_ur.
+
+        The roslaunch workflow loads params privately, which matches all
+        `~...` lookups. If the workflow is started with rosrun, only global
+        `/state_machine`, `/align_housing_yaw`, etc. may exist, so copy them
+        into this node's private namespace when no private namespace exists.
+        """
+        namespaces = (
+            "frames",
+            "topics",
+            "motion",
+            "micro_motion",
+            "contact",
+            "probe",
+            "search",
+            "center_port",
+            "looming",
+            "housing_plane",
+            "align_housing_yaw",
+            "insert",
+            "verify",
+            "extract",
+            "gripper",
+            "state_machine",
+            "workflow",
+            "photo_pose",
+        )
+        mirrored = []
+        for namespace in namespaces:
+            private_name = "~%s" % namespace
+            global_name = "/%s" % namespace
+            if rospy.has_param(private_name) or not rospy.has_param(global_name):
+                continue
+            rospy.set_param(private_name, rospy.get_param(global_name))
+            mirrored.append(namespace)
+        if mirrored:
+            rospy.loginfo(
+                "[usb_c_insertion] event=preinsert_params_mirrored_from_global namespaces=%s",
+                ",".join(mirrored),
+            )
+
+    @staticmethod
+    def _required_param(name: str):
+        if rospy.has_param(name):
+            return rospy.get_param(name)
+        resolved_name = rospy.resolve_name(name)
+        rospy.logerr(
+            "[usb_c_insertion] event=preinsert_missing_required_param param=%s resolved_param=%s",
+            name,
+            resolved_name,
+        )
+        raise RuntimeError("Missing required ROS parameter: %s (%s)" % (name, resolved_name))
+
+    @classmethod
+    def _required_str_param(cls, name: str) -> str:
+        return str(cls._required_param(name)).strip()
+
+    @classmethod
+    def _required_float_param(cls, name: str) -> float:
+        return float(cls._required_param(name))
+
+    @classmethod
+    def _required_int_param(cls, name: str) -> int:
+        return int(cls._required_param(name))
+
+    @classmethod
+    def _required_bool_param(cls, name: str) -> bool:
+        value = cls._required_param(name)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in ("true", "1", "yes", "on"):
+                return True
+            if normalized in ("false", "0", "no", "off"):
+                return False
+            resolved_name = rospy.resolve_name(name)
+            raise ValueError("Invalid boolean ROS parameter: %s (%s)=%r" % (name, resolved_name, value))
+        return bool(value)
 
     def wait_for_dependencies(self) -> bool:
         checks = (
@@ -117,14 +195,14 @@ class PreinsertWorkflowHelpers:
 
     def load_overview_pose(self) -> PoseStamped:
         pose = PoseStamped()
-        pose.header.frame_id = str(rospy.get_param("~photo_pose/frame_id", self.base_frame))
-        pose.pose.position.x = float(rospy.get_param("~photo_pose/x", 0.50))
-        pose.pose.position.y = float(rospy.get_param("~photo_pose/y", 0.1))
-        pose.pose.position.z = float(rospy.get_param("~photo_pose/z", 0.3))
-        qx = float(rospy.get_param("~photo_pose/qx", 0.708))
-        qy = float(rospy.get_param("~photo_pose/qy", 0.0))
-        qz = float(rospy.get_param("~photo_pose/qz", 0.0))
-        qw = float(rospy.get_param("~photo_pose/qw", 0.705))
+        pose.header.frame_id = self._required_str_param("~photo_pose/frame_id")
+        pose.pose.position.x = self._required_float_param("~photo_pose/x")
+        pose.pose.position.y = self._required_float_param("~photo_pose/y")
+        pose.pose.position.z = self._required_float_param("~photo_pose/z")
+        qx = self._required_float_param("~photo_pose/qx")
+        qy = self._required_float_param("~photo_pose/qy")
+        qz = self._required_float_param("~photo_pose/qz")
+        qw = self._required_float_param("~photo_pose/qw")
         qx, qy, qz, qw = normalize_quaternion((qx, qy, qz, qw))
         pose.pose.orientation.x = qx
         pose.pose.orientation.y = qy
@@ -242,14 +320,25 @@ class PreinsertWorkflowHelpers:
 
     def align_housing_yaw(self) -> bool:
         goal = AlignHousingYawGoal()
-        goal.image_topic = str(rospy.get_param("~align_housing_yaw/image_topic", "")).strip()
-        goal.cloud_topic = str(rospy.get_param("~align_housing_yaw/cloud_topic", "")).strip()
-        goal.estimate_timeout = float(rospy.get_param("~align_housing_yaw/estimate_timeout", 3.0))
-        goal.yaw_tolerance_rad = float(rospy.get_param("~align_housing_yaw/yaw_tolerance_rad", 0.0175))
-        goal.max_iterations = int(rospy.get_param("~align_housing_yaw/max_iterations", 10))
-        goal.max_yaw_step_rad = float(rospy.get_param("~align_housing_yaw/max_yaw_step_rad", 0.25))
-        goal.settle_time = float(rospy.get_param("~align_housing_yaw/settle_time", self._move_settle_time))
-        goal.move_timeout = float(rospy.get_param("~align_housing_yaw/move_timeout", self._move_timeout))
+        goal.image_topic = self._required_str_param("~align_housing_yaw/image_topic")
+        goal.cloud_topic = self._required_str_param("~align_housing_yaw/cloud_topic")
+        goal.estimate_timeout = self._required_float_param("~align_housing_yaw/estimate_timeout")
+        goal.yaw_tolerance_rad = self._required_float_param("~align_housing_yaw/yaw_tolerance_rad")
+        goal.max_iterations = self._required_int_param("~align_housing_yaw/max_iterations")
+        goal.max_yaw_step_rad = self._required_float_param("~align_housing_yaw/max_yaw_step_rad")
+        goal.settle_time = self._required_float_param("~align_housing_yaw/settle_time")
+        goal.move_timeout = self._required_float_param("~align_housing_yaw/move_timeout")
+        rospy.loginfo(
+            "[usb_c_insertion] event=preinsert_align_housing_yaw_goal image_topic=%s cloud_topic=%s estimate_timeout=%.2f yaw_tolerance_rad=%.4f max_iterations=%d max_yaw_step_rad=%.4f settle_time=%.2f move_timeout=%.2f",
+            goal.image_topic,
+            goal.cloud_topic,
+            goal.estimate_timeout,
+            goal.yaw_tolerance_rad,
+            int(goal.max_iterations),
+            goal.max_yaw_step_rad,
+            goal.settle_time,
+            goal.move_timeout,
+        )
         self._align_client.send_goal(goal)
         finished = self._align_client.wait_for_result(
             rospy.Duration.from_sec(max(1.0, goal.max_iterations * (goal.move_timeout + goal.estimate_timeout + 7.0)))
@@ -277,13 +366,13 @@ class PreinsertWorkflowHelpers:
 
     def center_port_in_image(self) -> Optional[PoseStamped]:
         goal = CenterPortInImageGoal()
-        goal.image_topic = str(rospy.get_param("~center_port/image_topic", "")).strip()
-        goal.timeout = float(rospy.get_param("~center_port/timeout", 60.0))
-        goal.pixel_tolerance = float(rospy.get_param("~center_port/pixel_tolerance", 2.0))
-        goal.stable_time = float(rospy.get_param("~center_port/stable_time", 0.35))
-        goal.max_velocity = float(rospy.get_param("~center_port/max_velocity", 0.012))
-        goal.gain = float(rospy.get_param("~center_port/gain", 0.0001))
-        goal.min_blob_area = float(rospy.get_param("~center_port/min_blob_area", 120.0))
+        goal.image_topic = self._required_str_param("~center_port/image_topic")
+        goal.timeout = self._required_float_param("~center_port/timeout")
+        goal.pixel_tolerance = self._required_float_param("~center_port/pixel_tolerance")
+        goal.stable_time = self._required_float_param("~center_port/stable_time")
+        goal.max_velocity = self._required_float_param("~center_port/max_velocity")
+        goal.gain = self._required_float_param("~center_port/gain")
+        goal.min_blob_area = self._required_float_param("~center_port/min_blob_area")
         self._center_client.send_goal(goal)
         finished = self._center_client.wait_for_result(rospy.Duration.from_sec(max(1.0, goal.timeout + 5.0)))
         if not finished:
@@ -343,15 +432,15 @@ class PreinsertWorkflowHelpers:
 
     def verify_looming(self):
         goal = VerifyLoomingGoal()
-        goal.image_topic = str(rospy.get_param("~looming/image_topic", "")).strip()
-        goal.travel_distance = float(rospy.get_param("~looming/travel_distance", 0.025))
-        goal.travel_speed = float(rospy.get_param("~looming/travel_speed", 0.006))
-        goal.timeout = float(rospy.get_param("~looming/timeout", 8.0))
-        goal.min_blob_area = float(rospy.get_param("~looming/min_blob_area", 120.0))
-        goal.min_scale_ratio = float(rospy.get_param("~looming/min_scale_ratio", 1.12))
-        goal.max_center_shift_px = float(rospy.get_param("~looming/max_center_shift_px", 10.0))
-        goal.max_aspect_ratio_change = float(rospy.get_param("~looming/max_aspect_ratio_change", 0.35))
-        goal.tool_z_direction_sign = float(rospy.get_param("~looming/tool_z_direction_sign", 1.0))
+        goal.image_topic = self._required_str_param("~looming/image_topic")
+        goal.travel_distance = self._required_float_param("~looming/travel_distance")
+        goal.travel_speed = self._required_float_param("~looming/travel_speed")
+        goal.timeout = self._required_float_param("~looming/timeout")
+        goal.min_blob_area = self._required_float_param("~looming/min_blob_area")
+        goal.min_scale_ratio = self._required_float_param("~looming/min_scale_ratio")
+        goal.max_center_shift_px = self._required_float_param("~looming/max_center_shift_px")
+        goal.max_aspect_ratio_change = self._required_float_param("~looming/max_aspect_ratio_change")
+        goal.tool_z_direction_sign = self._required_float_param("~looming/tool_z_direction_sign")
         self._looming_client.send_goal(goal)
         finished = self._looming_client.wait_for_result(rospy.Duration.from_sec(max(1.0, goal.timeout + 5.0)))
         if not finished:
@@ -377,8 +466,8 @@ class PreinsertWorkflowHelpers:
         return result
 
     def validate_plane_quality(self, plane_result, label: str) -> bool:
-        min_ratio = float(rospy.get_param("~workflow/min_plane_inlier_ratio", 0.80))
-        max_rms = float(rospy.get_param("~workflow/max_plane_rms_error", 0.004))
+        min_ratio = self._required_float_param("~workflow/min_plane_inlier_ratio")
+        max_rms = self._required_float_param("~workflow/max_plane_rms_error")
         if float(plane_result.inlier_ratio) < min_ratio:
             rospy.logerr(
                 "[usb_c_insertion] event=preinsert_workflow_failed reason=plane_inlier_ratio_too_low label=%s ratio=%.3f min_ratio=%.3f",
@@ -473,18 +562,18 @@ class PreinsertWorkflowHelpers:
 
     def _build_estimate_goal(self) -> EstimateHousingPlaneGoal:
         goal = EstimateHousingPlaneGoal()
-        goal.image_topic = str(rospy.get_param("~housing_plane/image_topic", "")).strip()
-        goal.cloud_topic = str(rospy.get_param("~housing_plane/cloud_topic", "")).strip()
-        goal.timeout = float(rospy.get_param("~housing_plane/timeout", 3.0))
-        goal.min_blob_area = float(rospy.get_param("~housing_plane/min_blob_area", 120.0))
-        goal.roi_radius_px = int(rospy.get_param("~housing_plane/roi_radius_px", 70))
-        goal.roi_stride_px = int(rospy.get_param("~housing_plane/roi_stride_px", 2))
-        goal.depth_window_m = float(rospy.get_param("~housing_plane/depth_window_m", 0.06))
-        goal.ransac_iterations = int(rospy.get_param("~housing_plane/ransac_iterations", 120))
-        goal.ransac_distance_threshold = float(rospy.get_param("~housing_plane/ransac_distance_threshold", 0.004))
-        goal.min_inliers = int(rospy.get_param("~housing_plane/min_inliers", 120))
-        goal.use_svd_refit = bool(rospy.get_param("~housing_plane/use_svd_refit", True))
-        goal.use_largest_component = bool(rospy.get_param("~housing_plane/use_largest_component", True))
+        goal.image_topic = self._required_str_param("~housing_plane/image_topic")
+        goal.cloud_topic = self._required_str_param("~housing_plane/cloud_topic")
+        goal.timeout = self._required_float_param("~housing_plane/timeout")
+        goal.min_blob_area = self._required_float_param("~housing_plane/min_blob_area")
+        goal.roi_radius_px = self._required_int_param("~housing_plane/roi_radius_px")
+        goal.roi_stride_px = self._required_int_param("~housing_plane/roi_stride_px")
+        goal.depth_window_m = self._required_float_param("~housing_plane/depth_window_m")
+        goal.ransac_iterations = self._required_int_param("~housing_plane/ransac_iterations")
+        goal.ransac_distance_threshold = self._required_float_param("~housing_plane/ransac_distance_threshold")
+        goal.min_inliers = self._required_int_param("~housing_plane/min_inliers")
+        goal.use_svd_refit = self._required_bool_param("~housing_plane/use_svd_refit")
+        goal.use_largest_component = self._required_bool_param("~housing_plane/use_largest_component")
         return goal
 
     def _desired_camera_position_and_yaw(self, port_pose: PoseStamped):

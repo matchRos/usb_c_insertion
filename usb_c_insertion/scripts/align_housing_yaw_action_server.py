@@ -38,6 +38,8 @@ class AlignHousingYawActionServer:
     """
 
     def __init__(self):
+        self._mirror_global_config_to_private_namespace()
+
         self._action_name = str(rospy.get_param("~align_housing_yaw/action_name", "align_housing_yaw")).strip()
         self._estimate_action_name = str(
             rospy.get_param("~align_housing_yaw/estimate_action_name", "estimate_housing_plane")
@@ -92,6 +94,31 @@ class AlignHousingYawActionServer:
             self._target_axis_from_plane_normal_sign,
         )
 
+    def _mirror_global_config_to_private_namespace(self) -> None:
+        """
+        Let a manually started action server use YAML loaded globally by launch_ur.
+        """
+        namespaces = (
+            "frames",
+            "topics",
+            "motion",
+            "housing_plane",
+            "align_housing_yaw",
+        )
+        mirrored = []
+        for namespace in namespaces:
+            private_name = "~%s" % namespace
+            global_name = "/%s" % namespace
+            if rospy.has_param(private_name) or not rospy.has_param(global_name):
+                continue
+            rospy.set_param(private_name, rospy.get_param(global_name))
+            mirrored.append(namespace)
+        if mirrored:
+            rospy.loginfo(
+                "[usb_c_insertion] event=align_housing_yaw_params_mirrored_from_global namespaces=%s",
+                ",".join(mirrored),
+            )
+
     def _execute(self, goal) -> None:
         started_at = rospy.Time.now()
         if not self._estimate_client.wait_for_server(rospy.Duration.from_sec(max(0.1, self._estimate_wait_timeout))):
@@ -109,6 +136,17 @@ class AlignHousingYawActionServer:
         max_yaw_step_rad = self._goal_or_default(goal.max_yaw_step_rad, self._default_max_yaw_step_rad)
         settle_time = self._goal_or_default(goal.settle_time, self._default_settle_time)
         move_timeout = self._goal_or_default(goal.move_timeout, self._default_move_timeout)
+        rospy.loginfo(
+            "[usb_c_insertion] event=align_housing_yaw_goal_received image_topic=%s cloud_topic=%s estimate_timeout=%.2f yaw_tolerance_rad=%.4f max_iterations=%d max_yaw_step_rad=%.4f settle_time=%.2f move_timeout=%.2f",
+            image_topic,
+            cloud_topic,
+            estimate_timeout,
+            yaw_tolerance_rad,
+            max_iterations,
+            max_yaw_step_rad,
+            settle_time,
+            move_timeout,
+        )
 
         initial_error: Optional[float] = None
         final_error = 0.0

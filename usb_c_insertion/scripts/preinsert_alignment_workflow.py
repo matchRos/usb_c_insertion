@@ -25,9 +25,7 @@ class PreinsertAlignmentWorkflow:
 
     def __init__(self):
         self._helpers = PreinsertWorkflowHelpers()
-        self._updated_port_pose_topic = str(
-            rospy.get_param("~workflow/updated_port_pose_topic", "/usb_c_insertion/updated_port_pose")
-        ).strip()
+        self._updated_port_pose_topic = self._helpers._required_str_param("~workflow/updated_port_pose_topic")
         self._updated_port_pose_publisher = rospy.Publisher(
             self._updated_port_pose_topic,
             PoseStamped,

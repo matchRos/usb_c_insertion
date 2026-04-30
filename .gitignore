@@ -1,3 +1,5 @@
 usb_c_insertion/scripts/GUI.sh
 usb_c_insertion/scripts/run_vision.sh
 usb_c_insertion/scripts/setup_vision_server.sh
+__pycache__/
+*.py[cod]

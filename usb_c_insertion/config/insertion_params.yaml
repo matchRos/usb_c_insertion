@@ -4,17 +4,16 @@ motion:
   search_speed: 0.003
   search_traverse_speed: 0.012
   move_speed: 0.05
-  max_linear_speed: 0.3
-  max_angular_speed: 0.4
-  max_linear_acceleration: 0.1
-  max_angular_acceleration: 0.3
+  max_linear_speed: 0.05
+  max_angular_speed: 0.25
+  max_linear_acceleration: 0.03
+  max_angular_acceleration: 0.15
   twist_smoothing_alpha: 0.25
   watchdog_timeout: 0.1
-  pose_servo_position_gain: 1.5
   pose_servo_position_kp: 1.5
-  pose_servo_position_ki: 0.08
-  pose_servo_position_kd: 0.2
-  pose_servo_position_integral_limit: 0.05
+  pose_servo_position_ki: 0.0
+  pose_servo_position_kd: 0.0
+  pose_servo_position_integral_limit: 0.02
   pose_servo_orientation_gain: 1.0
   pose_servo_position_tolerance: 0.0005
   pose_servo_orientation_tolerance: 0.01
@@ -167,7 +166,7 @@ align_housing_yaw:
   cloud_topic: "/zedm/zed_node/point_cloud/cloud_registered"
   estimate_timeout: 3.0
   yaw_tolerance_rad: 0.01
-  max_iterations: 10
+  max_iterations: 12
   max_yaw_step_rad: 0.25
   settle_time: 0.15
   move_timeout: 20.0
@@ -228,10 +227,21 @@ gripper:
   fallback_digital_output_state: true
   io_service_name: "/ur_hardware_interface/set_io"
 
+photo_pose:
+  frame_id: "base_link"
+  x: 0.50
+  y: 0.10
+  z: 0.30
+  qx: 0.708
+  qy: 0.0
+  qz: 0.0
+  qw: 0.705
+  settle_time: 0.4
+  timeout: 20.0
+  require_fresh_vision_result: true
+
 state_machine:
-  enabled: true
   auto_zero_ft: true
-  log_debug: true
   target_offset_tool_x: -0.0195
   target_offset_tool_y: -0.006
   prepose_offset: -0.01
@@ -245,13 +255,12 @@ state_machine:
   position_tolerance: 0.002
 
 workflow:
-  refine_vision_enabled: true
-  refine_vision_required: true
+  move_action_name: "move_to_pose"
+  vision_service_name: "run_vision"
   refine_camera_frame: "usb_c_zedm_left_camera_optical_frame"
   refine_camera_distance: 0.18
   refine_yaw_delta_sign: 1.0
   refine_yaw_max_delta_deg: 45.0
-  yaw_correction_use_current_position: true
   updated_port_pose_topic: "/usb_c_insertion/updated_port_pose"
   min_plane_inlier_ratio: 0.80
   max_plane_rms_error: 0.004
