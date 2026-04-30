@@ -90,6 +90,7 @@ class CombinedInsertionWorkflow:
 
         self._status_topic = required_str_param("~combined_workflow/status_topic")
         self._startup_delay = required_float_param("~combined_workflow/startup_delay")
+        self._settle_before_insertion = required_float_param("~combined_workflow/settle_before_insertion")
         self._wait_after_insertion = required_float_param("~combined_workflow/wait_after_insertion")
         self._return_to_start = required_bool_param("~combined_workflow/return_to_start")
         self._return_to_start_timeout = required_float_param("~combined_workflow/return_to_start_timeout")
@@ -311,7 +312,22 @@ class CombinedInsertionWorkflow:
         return True
 
     def _run_insertion(self) -> bool:
-        self._status.publish("insertion", "running")
+        settle_time = max(0.0, self._settle_before_insertion)
+        self._status.publish(
+            "insertion",
+            "running",
+            message="settling_before_insertion",
+            values={"settle_s": round(settle_time, 2)},
+        )
+        RobotInterface().stop_motion()
+        if settle_time > 0.0:
+            rospy.loginfo(
+                "[usb_c_insertion] event=combined_workflow_settle_before_insertion duration=%.3f",
+                settle_time,
+            )
+            rospy.sleep(settle_time)
+
+        self._status.publish("insertion", "running", message="starting_insertion_workflow")
         insertion = InsertionWorkflow()
         success = insertion.run()
         values = {"final_tool_pose": self._current_tool_pose_values()}

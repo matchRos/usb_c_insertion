@@ -609,7 +609,7 @@ class InsertionWorkflow:
                         probe.inserted_depth,
                         probe.max_contact_force,
                     )
-                verified, method = self._verify_search_candidate(
+                verified, method_or_reason = self._verify_search_candidate(
                     surface_xyz,
                     probe_direction,
                     probe.final_pose,
@@ -618,7 +618,7 @@ class InsertionWorkflow:
                     return SpiralSearchResult(
                         True,
                         "candidate_verified",
-                        method,
+                        method_or_reason,
                         completed_steps,
                         total_steps,
                         probe.inserted_depth,
@@ -627,7 +627,7 @@ class InsertionWorkflow:
                 if not self._search_continue_after_unverified_candidate:
                     return SpiralSearchResult(
                         False,
-                        "candidate_not_verified",
+                        method_or_reason,
                         "spiral_search",
                         completed_steps,
                         total_steps,

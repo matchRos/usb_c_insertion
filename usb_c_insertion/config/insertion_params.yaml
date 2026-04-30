@@ -223,7 +223,7 @@ insertion_workflow:
   contact_settle_time: 0.1
   pull_tool_z_sign: -1.0
   pull_force_mode: "tool_z"
-  zero_ft_before_pull: true
+  zero_ft_before_pull: false
   pull_force_target: 5.0
   pull_force_tolerance: 0.5
   pull_force_gain: 0.002
@@ -234,30 +234,30 @@ insertion_workflow:
   return_to_contact_after_failed_pull: true
   return_timeout: 3.0
   lateral_verify_after_failed_pull: true
-  zero_ft_before_lateral_verify: true
+  zero_ft_before_lateral_verify: false
   lateral_verify_timeout: 2.0
   verification_zero_ft_settle_time: 0.25
   search_enabled: true
-  search_timeout: 90.0
-  search_step_tool_x: 0.001
-  search_step_base_z: 0.001
-  search_width_tool_x: 0.008
-  search_height_base_z: 0.006
+  search_timeout: 60.0
+  search_step_tool_x: 0.0011
+  search_step_base_z: 0.0011
+  search_width_tool_x: 0.006
+  search_height_base_z: 0.005
   search_preferred_tool_x_sign: -1.0
   search_preferred_base_z_sign: 1.0
-  search_pre_probe_clearance: 0.0015
-  search_pre_probe_settle_time: 0.05
-  search_transfer_timeout: 3.0
-  search_probe_speed_limit: 0.0015
-  search_probe_min_speed: 0.0002
-  search_probe_force_gain: 0.003
-  search_probe_timeout: 4.0
-  search_probe_max_travel: 0.004
+  search_pre_probe_clearance: 0.0012
+  search_pre_probe_settle_time: 0.03
+  search_transfer_timeout: 2.0
+  search_probe_speed_limit: 0.0022
+  search_probe_min_speed: 0.00045
+  search_probe_force_gain: 0.004
+  search_probe_timeout: 2.5
+  search_probe_max_travel: 0.0035
   search_contact_force_target: 1.5
   search_contact_force_abort_threshold: 5.0
   search_socket_depth_threshold: 0.002
-  search_candidate_pull_verify: true
-  search_candidate_lateral_verify: true
+  search_candidate_pull_verify: false
+  search_candidate_lateral_verify: false
   search_insert_after_candidate: true
   search_continue_after_unverified_candidate: false
   search_direct_stop_repeat_count: 20
@@ -266,6 +266,7 @@ insertion_workflow:
 combined_workflow:
   status_topic: "/usb_c_insertion/combined_workflow/status"
   startup_delay: 1.0
+  settle_before_insertion: 1.0
   wait_after_insertion: 3.0
   return_to_start: true
   return_to_start_timeout: 20.0
@@ -274,7 +275,7 @@ combined_workflow:
   pipeline_wait_timeout: 3.0
 
 extract:
-  distance: 0.05
+  distance: 0.03
   pull_force_target: 8.0
   pull_force_tolerance: 1.0
   pull_force_gain: 0.003
@@ -288,7 +289,7 @@ extract:
   wiggle_speed_y: 0.002
   wiggle_speed_z: 0.0
   wiggle_frequency: 2.0
-  timeout: 8.0
+  timeout: 10.0
   max_lateral_force: 25.0
   max_torque_norm: 5.0
   release_after_extract: true
