@@ -17,6 +17,7 @@ if SCRIPT_DIR not in sys.path:
 
 from contact_detector import ContactDetector
 from ft_interface import WrenchData
+from param_utils import required_float_param
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
 
@@ -47,13 +48,13 @@ class WallProbe:
         self._tf_interface = tf_interface
         self._contact_detector = contact_detector
 
-        self._probe_speed = float(rospy.get_param("~motion/probe_speed", 0.005))
-        self._retract_speed = float(rospy.get_param("~motion/retract_speed", 0.008))
-        self._command_rate = float(rospy.get_param("~motion/command_rate", 500.0))
-        self._retract_distance = float(rospy.get_param("~probe/retract_distance", 0.01))
-        self._max_probe_distance = float(rospy.get_param("~probe/max_probe_distance", 0.08))
-        self._probe_timeout = float(rospy.get_param("~probe/probe_timeout", 10.0))
-        self._force_norm_threshold = float(rospy.get_param("~contact/force_threshold_norm", 4.0))
+        self._probe_speed = required_float_param("~motion/probe_speed")
+        self._retract_speed = required_float_param("~motion/retract_speed")
+        self._command_rate = required_float_param("~motion/command_rate")
+        self._retract_distance = required_float_param("~probe/retract_distance")
+        self._max_probe_distance = required_float_param("~probe/max_probe_distance")
+        self._probe_timeout = required_float_param("~probe/probe_timeout")
+        self._force_norm_threshold = required_float_param("~contact/force_threshold_norm")
 
     def probe_until_contact(
         self,

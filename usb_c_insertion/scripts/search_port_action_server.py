@@ -18,6 +18,7 @@ if SCRIPT_DIR not in sys.path:
 
 from contact_detector import ContactDetector
 from ft_interface import FTInterface
+from param_utils import required_bool_param, required_float_param, required_int_param, required_str_param
 from prepose_planner import rotate_vector_by_quaternion
 from robot_interface import RobotInterface
 from search_pattern import generate_centered_raster_pattern, generate_preferred_square_spiral_pattern
@@ -46,111 +47,69 @@ class SearchPortActionServer:
     """
 
     def __init__(self):
-        self._action_name = str(rospy.get_param("~action_name", "search_port")).strip()
-        self._move_action_name = str(rospy.get_param("~move_action_name", "move_to_pose")).strip()
-        self._micro_move_action_name = str(rospy.get_param("~micro_move_action_name", "micro_move")).strip()
-        self._verify_insertion_action_name = str(
-            rospy.get_param("~verify/action_name", "verify_insertion")
-        ).strip()
-        self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link")).strip()
-        self._twist_topic = str(rospy.get_param("~topics/twist_cmd", "/twist_controller/command")).strip()
-        self._micro_motion_active_topic = str(
-            rospy.get_param("~topics/micro_motion_active", "/usb_c_insertion/micro_motion_active")
-        ).strip()
+        self._action_name = "search_port"
+        self._move_action_name = "move_to_pose"
+        self._micro_move_action_name = "micro_move"
+        self._verify_insertion_action_name = required_str_param("~verify/action_name")
+        self._base_frame = required_str_param("~frames/base_frame")
+        self._twist_topic = required_str_param("~topics/twist_cmd")
+        self._micro_motion_active_topic = required_str_param("~topics/micro_motion_active")
 
-        self._search_pattern = str(rospy.get_param("~search/pattern", "spiral")).strip().lower()
-        self._search_step_x = float(rospy.get_param("~search/step_x", 0.001))
-        self._search_step_y = float(rospy.get_param("~search/step_y", 0.001))
-        self._search_width = float(rospy.get_param("~search/max_search_width", 0.02))
-        self._search_height = float(rospy.get_param("~search/max_search_height", 0.02))
-        self._search_timeout = float(rospy.get_param("~search/search_timeout", 50.0))
-        self._search_preferred_tool_x_sign = float(rospy.get_param("~search/preferred_tool_x_sign", -1.0))
-        self._search_preferred_z_sign = float(rospy.get_param("~search/preferred_z_sign", 1.0))
-        self._search_diagonal_first = bool(rospy.get_param("~search/diagonal_first", True))
+        self._search_pattern = required_str_param("~search/pattern").lower()
+        self._search_step_x = required_float_param("~search/step_x")
+        self._search_step_y = required_float_param("~search/step_y")
+        self._search_width = required_float_param("~search/max_search_width")
+        self._search_height = required_float_param("~search/max_search_height")
+        self._search_timeout = required_float_param("~search/search_timeout")
+        self._search_preferred_tool_x_sign = required_float_param("~search/preferred_tool_x_sign")
+        self._search_preferred_z_sign = required_float_param("~search/preferred_z_sign")
+        self._search_diagonal_first = required_bool_param("~search/diagonal_first")
 
-        self._search_transfer_timeout = float(rospy.get_param("~search/transfer_timeout", 1.2))
-        self._search_transfer_max_velocity = float(rospy.get_param("~search/transfer_max_velocity", 0.0))
-        self._search_transfer_max_acceleration = float(rospy.get_param("~search/transfer_max_acceleration", 0.0))
-        self._search_transfer_max_jerk = float(rospy.get_param("~search/transfer_max_jerk", 0.0))
-        self._search_transfer_arc_enabled = bool(rospy.get_param("~search/transfer_arc_enabled", True))
-        self._search_transfer_arc_height = max(0.0, float(rospy.get_param("~search/transfer_arc_height", 0.004)))
-        self._search_pre_probe_clearance = max(0.0, float(rospy.get_param("~search/pre_probe_clearance", 0.001)))
-        self._search_pre_probe_settle_time = max(
-            0.0,
-            float(rospy.get_param("~search/pre_probe_settle_time", 0.1)),
-        )
+        self._search_transfer_timeout = required_float_param("~search/transfer_timeout")
+        self._search_transfer_max_velocity = required_float_param("~search/transfer_max_velocity")
+        self._search_transfer_max_acceleration = required_float_param("~search/transfer_max_acceleration")
+        self._search_transfer_max_jerk = required_float_param("~search/transfer_max_jerk")
+        self._search_transfer_arc_enabled = required_bool_param("~search/transfer_arc_enabled")
+        self._search_transfer_arc_height = max(0.0, required_float_param("~search/transfer_arc_height"))
+        self._search_pre_probe_clearance = max(0.0, required_float_param("~search/pre_probe_clearance"))
+        self._search_pre_probe_settle_time = max(0.0, required_float_param("~search/pre_probe_settle_time"))
 
-        self._search_contact_force_target = float(rospy.get_param("~search/contact_force_target", 2.0))
-        self._search_initial_probe_speed = float(
-            rospy.get_param("~search/initial_probe_speed", rospy.get_param("~search/probe_speed", 0.004))
-        )
-        self._search_initial_probe_max_travel = float(rospy.get_param("~search/initial_probe_max_travel", 0.02))
-        self._search_initial_probe_timeout = float(rospy.get_param("~search/initial_probe_timeout", 8.0))
-        self._search_probe_speed = float(
-            rospy.get_param(
-                "~search/probe_speed",
-                0.004,
-            )
-        )
-        self._search_probe_timeout = float(rospy.get_param("~search/probe_timeout", 1.8))
-        self._search_probe_max_travel = float(rospy.get_param("~search/probe_max_travel", 0.004))
-        self._search_socket_depth_threshold = float(rospy.get_param("~search/socket_depth_threshold", 0.002))
-        self._search_verify_initial_contact = bool(rospy.get_param("~search/verify_initial_contact", True))
-        self._search_verification_required = bool(rospy.get_param("~search/verification_required", True))
-        self._search_verify_timeout = float(
-            rospy.get_param(
-                "~search/verify_timeout",
-                rospy.get_param("~verify/action_timeout", 2.0),
-            )
-        )
-        self._search_direct_stop_repeat_count = int(rospy.get_param("~search/direct_stop_repeat_count", 10))
-        self._search_direct_stop_interval = max(
-            0.0,
-            float(rospy.get_param("~search/direct_stop_interval", 0.001)),
-        )
-        self._search_zero_ft_before_search = bool(
-            rospy.get_param(
-                "~search/zero_ft_before_search",
-                rospy.get_param("~state_machine/auto_zero_ft", True),
-            )
-        )
+        self._search_contact_force_target = required_float_param("~search/contact_force_target")
+        self._search_initial_probe_speed = required_float_param("~search/initial_probe_speed")
+        self._search_initial_probe_max_travel = required_float_param("~search/initial_probe_max_travel")
+        self._search_initial_probe_timeout = required_float_param("~search/initial_probe_timeout")
+        self._search_probe_speed = required_float_param("~search/probe_speed")
+        self._search_probe_timeout = required_float_param("~search/probe_timeout")
+        self._search_probe_max_travel = required_float_param("~search/probe_max_travel")
+        self._search_socket_depth_threshold = required_float_param("~search/socket_depth_threshold")
+        self._search_verify_initial_contact = required_bool_param("~search/verify_initial_contact")
+        self._search_verification_required = required_bool_param("~search/verification_required")
+        self._search_verify_timeout = required_float_param("~search/verify_timeout")
+        self._search_direct_stop_repeat_count = required_int_param("~search/direct_stop_repeat_count")
+        self._search_direct_stop_interval = max(0.0, required_float_param("~search/direct_stop_interval"))
+        self._search_zero_ft_before_search = required_bool_param("~search/zero_ft_before_search")
 
-        self._precontact_offset_tool_x = float(rospy.get_param("~state_machine/precontact_offset_tool_x", 0.0))
-        self._precontact_offset_tool_y = float(rospy.get_param("~state_machine/precontact_offset_tool_y", 0.0))
-        self._precontact_offset_tool_z = float(rospy.get_param("~state_machine/precontact_offset_tool_z", -0.010))
-        self._target_offset_tool_x = float(
-            rospy.get_param(
-                "~state_machine/target_offset_tool_x",
-                rospy.get_param("~state_machine/probe_offset_tool_x", 0.0),
-            )
-        )
-        self._target_offset_tool_y = float(
-            rospy.get_param(
-                "~state_machine/target_offset_tool_y",
-                rospy.get_param("~state_machine/probe_offset_tool_y", 0.0),
-            )
-        )
-        self._move_settle_time = float(rospy.get_param("~motion/action_settle_time", 0.4))
-        self._looming_tool_z_direction_sign = self._sign(
-            rospy.get_param("~looming/tool_z_direction_sign", 1.0)
-        )
-        self._enforce_precontact_standoff = bool(
-            rospy.get_param("~state_machine/enforce_precontact_standoff", True)
-        )
-        self._min_precontact_standoff = abs(
-            float(rospy.get_param("~state_machine/min_precontact_standoff", 0.005))
-        )
+        self._precontact_offset_tool_x = required_float_param("~state_machine/precontact_offset_tool_x")
+        self._precontact_offset_tool_y = required_float_param("~state_machine/precontact_offset_tool_y")
+        self._precontact_offset_tool_z = required_float_param("~state_machine/precontact_offset_tool_z")
+        self._target_offset_tool_x = required_float_param("~state_machine/target_offset_tool_x")
+        self._target_offset_tool_y = required_float_param("~state_machine/target_offset_tool_y")
+        self._move_settle_time = required_float_param("~motion/action_settle_time")
+        self._command_rate = required_float_param("~motion/command_rate")
+        self._looming_tool_z_direction_sign = self._sign(required_float_param("~looming/tool_z_direction_sign"))
+        self._enforce_precontact_standoff = required_bool_param("~state_machine/enforce_precontact_standoff")
+        self._min_precontact_standoff = abs(required_float_param("~state_machine/min_precontact_standoff"))
 
         self._robot = RobotInterface()
         self._tf = TFInterface()
         self._ft = FTInterface(
-            wrench_topic=rospy.get_param("~topics/wrench", "/wrench"),
-            filter_window_size=rospy.get_param("~contact/baseline_window", 20),
-            wrench_timeout=rospy.get_param("~contact/wrench_timeout", 0.2),
+            wrench_topic=required_str_param("~topics/wrench"),
+            filter_window_size=required_int_param("~contact/baseline_window"),
+            wrench_timeout=required_float_param("~contact/wrench_timeout"),
         )
         self._contact_detector = ContactDetector(
             self._ft,
-            hysteresis=rospy.get_param("~contact/hysteresis", 0.5),
+            hysteresis=required_float_param("~contact/hysteresis"),
         )
         self._direct_twist_publisher = rospy.Publisher(self._twist_topic, Twist, queue_size=10)
         self._micro_motion_active_publisher = rospy.Publisher(
@@ -723,7 +682,7 @@ class SearchPortActionServer:
         total_steps: int,
     ) -> tuple[bool, str, Optional[Tuple[float, float, float]], float]:
         deadline = rospy.Time.now() + rospy.Duration.from_sec(max(0.1, timeout))
-        rate = rospy.Rate(max(1.0, float(rospy.get_param("~motion/command_rate", 500.0))))
+        rate = rospy.Rate(max(1.0, self._command_rate))
         direction = self._normalize_vector(direction_xyz)
         start_pose = self._tf.get_tool_pose_in_base()
         commanded_speed = max(0.0, float(speed))
@@ -821,7 +780,7 @@ class SearchPortActionServer:
         total_steps: int,
     ) -> tuple[bool, str, float, float]:
         deadline = rospy.Time.now() + rospy.Duration.from_sec(max(0.1, self._search_probe_timeout))
-        rate = rospy.Rate(max(1.0, float(rospy.get_param("~motion/command_rate", 500.0))))
+        rate = rospy.Rate(max(1.0, self._command_rate))
         direction = self._normalize_vector(direction_xyz)
         start_pose = self._tf.get_tool_pose_in_base()
         if start_pose is None:

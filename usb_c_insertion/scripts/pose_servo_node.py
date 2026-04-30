@@ -15,6 +15,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
+from param_utils import required_float_param, required_str_param
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
 from usb_c_insertion.msg import PoseServoStatus
@@ -29,25 +30,20 @@ class PoseServoNode:
     """
 
     def __init__(self):
-        self._target_topic = rospy.get_param("~topics/pose_target", "/usb_c_insertion/pose_target")
-        self._enable_topic = rospy.get_param("~topics/pose_servo_enable", "/usb_c_insertion/pose_servo_enable")
-        self._status_topic = rospy.get_param("~topics/pose_servo_status", "/usb_c_insertion/pose_servo_status")
+        self._target_topic = required_str_param("~topics/pose_target")
+        self._enable_topic = required_str_param("~topics/pose_servo_enable")
+        self._status_topic = required_str_param("~topics/pose_servo_status")
 
-        self._command_rate = float(rospy.get_param("~motion/command_rate", 500.0))
-        self._position_kp = float(
-            rospy.get_param(
-                "~motion/pose_servo_position_kp",
-                rospy.get_param("~motion/pose_servo_position_gain", 1.5),
-            )
-        )
-        self._position_ki = float(rospy.get_param("~motion/pose_servo_position_ki", 0.0))
-        self._position_kd = float(rospy.get_param("~motion/pose_servo_position_kd", 0.0))
-        self._position_integral_limit = float(rospy.get_param("~motion/pose_servo_position_integral_limit", 0.02))
-        self._orientation_gain = float(rospy.get_param("~motion/pose_servo_orientation_gain", 1.0))
-        self._position_tolerance = float(rospy.get_param("~motion/pose_servo_position_tolerance", 0.0005))
-        self._orientation_tolerance = float(rospy.get_param("~motion/pose_servo_orientation_tolerance", 0.03))
-        self._max_linear_speed = float(rospy.get_param("~motion/max_linear_speed", 0.05))
-        self._max_angular_speed = float(rospy.get_param("~motion/max_angular_speed", 0.25))
+        self._command_rate = required_float_param("~motion/command_rate")
+        self._position_kp = required_float_param("~motion/pose_servo_position_kp")
+        self._position_ki = required_float_param("~motion/pose_servo_position_ki")
+        self._position_kd = required_float_param("~motion/pose_servo_position_kd")
+        self._position_integral_limit = required_float_param("~motion/pose_servo_position_integral_limit")
+        self._orientation_gain = required_float_param("~motion/pose_servo_orientation_gain")
+        self._position_tolerance = required_float_param("~motion/pose_servo_position_tolerance")
+        self._orientation_tolerance = required_float_param("~motion/pose_servo_orientation_tolerance")
+        self._max_linear_speed = required_float_param("~motion/max_linear_speed")
+        self._max_angular_speed = required_float_param("~motion/max_angular_speed")
 
         self._tf = TFInterface()
         self._robot = RobotInterface()

@@ -8,6 +8,8 @@ import rospy
 import tf2_ros
 from geometry_msgs.msg import PoseStamped, TransformStamped
 
+from param_utils import required_str_param
+
 
 class TFInterface:
     """
@@ -18,8 +20,8 @@ class TFInterface:
     """
 
     def __init__(self, tf_timeout: float = 0.2, cache_time: float = 5.0):
-        self._base_frame = rospy.get_param("~frames/base_frame", "base_link")
-        self._tool_frame = rospy.get_param("~frames/tool_frame", "tool0_controller")
+        self._base_frame = required_str_param("~frames/base_frame")
+        self._tool_frame = required_str_param("~frames/tool_frame")
         self._tf_timeout = rospy.Duration.from_sec(max(0.0, float(tf_timeout)))
 
         self._buffer = tf2_ros.Buffer(cache_time=rospy.Duration.from_sec(max(0.1, float(cache_time))))

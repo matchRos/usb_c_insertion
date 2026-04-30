@@ -22,6 +22,13 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
+from param_utils import (
+    required_bool_param,
+    required_float_param,
+    required_int_param,
+    required_str_param,
+    required_vector_param,
+)
 from prepose_planner import rotate_vector_by_quaternion
 from tf_interface import TFInterface
 from usb_c_insertion.msg import (
@@ -64,44 +71,36 @@ class EstimateHousingPlaneActionServer:
     """
 
     def __init__(self):
-        self._action_name = str(rospy.get_param("~housing_plane/action_name", "estimate_housing_plane")).strip()
-        self._default_image_topic = str(
-            rospy.get_param("~housing_plane/image_topic", "/zedm/zed_node/left/image_rect_color")
-        ).strip()
-        self._default_cloud_topic = str(
-            rospy.get_param("~housing_plane/cloud_topic", "/zedm/zed_node/point_cloud/cloud_registered")
-        ).strip()
-        self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link")).strip()
-        self._base_transform_frame = str(
-            rospy.get_param("~housing_plane/base_transform_frame", "")
-        ).strip()
-        self._cloud_to_base_transform_rotation = str(
-            rospy.get_param("~housing_plane/cloud_to_base_transform_rotation", "identity")
-        ).strip().lower()
-        self._command_rate = max(1.0, float(rospy.get_param("~housing_plane/command_rate", 20.0)))
-        self._default_timeout = float(rospy.get_param("~housing_plane/timeout", 3.0))
-        self._default_min_blob_area = float(rospy.get_param("~housing_plane/min_blob_area", 120.0))
-        self._default_roi_radius_px = int(rospy.get_param("~housing_plane/roi_radius_px", 70))
-        self._default_roi_stride_px = int(rospy.get_param("~housing_plane/roi_stride_px", 2))
-        self._default_depth_window_m = float(rospy.get_param("~housing_plane/depth_window_m", 0.06))
-        self._default_ransac_iterations = int(rospy.get_param("~housing_plane/ransac_iterations", 120))
-        self._default_ransac_distance_threshold = float(
-            rospy.get_param("~housing_plane/ransac_distance_threshold", 0.004)
+        self._action_name = required_str_param("~housing_plane/action_name")
+        self._default_image_topic = required_str_param("~housing_plane/image_topic")
+        self._default_cloud_topic = required_str_param("~housing_plane/cloud_topic")
+        self._base_frame = required_str_param("~frames/base_frame")
+        self._base_transform_frame = required_str_param("~housing_plane/base_transform_frame")
+        self._cloud_to_base_transform_rotation = required_str_param(
+            "~housing_plane/cloud_to_base_transform_rotation"
+        ).lower()
+        self._command_rate = max(1.0, required_float_param("~housing_plane/command_rate"))
+        self._default_timeout = required_float_param("~housing_plane/timeout")
+        self._default_min_blob_area = required_float_param("~housing_plane/min_blob_area")
+        self._default_roi_radius_px = required_int_param("~housing_plane/roi_radius_px")
+        self._default_roi_stride_px = required_int_param("~housing_plane/roi_stride_px")
+        self._default_depth_window_m = required_float_param("~housing_plane/depth_window_m")
+        self._default_ransac_iterations = required_int_param("~housing_plane/ransac_iterations")
+        self._default_ransac_distance_threshold = required_float_param(
+            "~housing_plane/ransac_distance_threshold"
         )
-        self._default_min_inliers = int(rospy.get_param("~housing_plane/min_inliers", 120))
-        self._default_use_svd_refit = bool(rospy.get_param("~housing_plane/use_svd_refit", True))
-        self._default_use_largest_component = bool(
-            rospy.get_param("~housing_plane/use_largest_component", True)
-        )
-        self._marker_ray_window_px = max(0, int(rospy.get_param("~housing_plane/marker_ray_window_px", 2)))
-        self._max_image_age = float(rospy.get_param("~housing_plane/max_image_age", 0.5))
-        self._max_cloud_age = float(rospy.get_param("~housing_plane/max_cloud_age", 0.5))
+        self._default_min_inliers = required_int_param("~housing_plane/min_inliers")
+        self._default_use_svd_refit = required_bool_param("~housing_plane/use_svd_refit")
+        self._default_use_largest_component = required_bool_param("~housing_plane/use_largest_component")
+        self._marker_ray_window_px = max(0, required_int_param("~housing_plane/marker_ray_window_px"))
+        self._max_image_age = required_float_param("~housing_plane/max_image_age")
+        self._max_cloud_age = required_float_param("~housing_plane/max_cloud_age")
         self._image_rotation_deg = self._normalize_image_rotation_deg(
-            float(rospy.get_param("~housing_plane/image_rotation_deg", 180.0))
+            required_float_param("~housing_plane/image_rotation_deg")
         )
-        self._hsv_lower = self._read_hsv_param("~housing_plane/hsv_lower", (35, 70, 40))
-        self._hsv_upper = self._read_hsv_param("~housing_plane/hsv_upper", (90, 255, 255))
-        self._morph_kernel_size = max(0, int(rospy.get_param("~housing_plane/morph_kernel_size", 5)))
+        self._hsv_lower = self._read_hsv_param("~housing_plane/hsv_lower")
+        self._hsv_upper = self._read_hsv_param("~housing_plane/hsv_upper")
+        self._morph_kernel_size = max(0, required_int_param("~housing_plane/morph_kernel_size"))
 
         self._tf = TFInterface()
         self._lock = RLock()
@@ -857,11 +856,11 @@ class EstimateHousingPlaneActionServer:
         return int(value) if int(value) > 0 else int(default)
 
     @staticmethod
-    def _read_hsv_param(param_name: str, default_value) -> Tuple[int, int, int]:
-        value = rospy.get_param(param_name, list(default_value))
+    def _read_hsv_param(param_name: str) -> Tuple[int, int, int]:
+        value = required_vector_param(param_name)
         if not isinstance(value, (list, tuple)) or len(value) != 3:
             rospy.logwarn("[usb_c_insertion] event=estimate_housing_plane_invalid_hsv_param param=%s", param_name)
-            value = default_value
+            raise ValueError("Invalid HSV ROS parameter: %s" % rospy.resolve_name(param_name))
         return tuple(max(0, min(255, int(component))) for component in value)
 
     @staticmethod

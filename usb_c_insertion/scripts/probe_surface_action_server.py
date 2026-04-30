@@ -16,6 +16,7 @@ if SCRIPT_DIR not in sys.path:
 
 from contact_detector import ContactDetector
 from ft_interface import FTInterface
+from param_utils import required_float_param, required_int_param, required_str_param
 from prepose_planner import compute_port_frame_target, compute_tcp_target_orientation, rotate_vector_by_quaternion, tool_offset_to_port_offset
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
@@ -36,34 +37,12 @@ class ProbeSurfaceActionServer:
     """
 
     def __init__(self):
-        self._action_name = str(rospy.get_param("~action_name", "probe_surface")).strip()
-        self._move_action_name = str(rospy.get_param("~move_action_name", "move_to_pose")).strip()
-        self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link"))
+        self._action_name = "probe_surface"
+        self._move_action_name = "move_to_pose"
+        self._base_frame = required_str_param("~frames/base_frame")
 
-        self._target_offset_tool_x = float(
-            rospy.get_param(
-                "~state_machine/target_offset_tool_x",
-                rospy.get_param(
-                    "~state_machine/probe_offset_tool_x",
-                    rospy.get_param(
-                        "~state_machine/prepose_offset_tool_x",
-                        -float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0)),
-                    ),
-                ),
-            )
-        )
-        self._target_offset_tool_y = float(
-            rospy.get_param(
-                "~state_machine/target_offset_tool_y",
-                rospy.get_param(
-                    "~state_machine/probe_offset_tool_y",
-                    rospy.get_param(
-                        "~state_machine/prepose_offset_tool_y",
-                        float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0)),
-                    ),
-                ),
-            )
-        )
+        self._target_offset_tool_x = required_float_param("~state_machine/target_offset_tool_x")
+        self._target_offset_tool_y = required_float_param("~state_machine/target_offset_tool_y")
         self._probe_offset_x, self._probe_offset_y, self._probe_offset_z = tool_offset_to_port_offset(
             (
                 self._target_offset_tool_x,
@@ -71,25 +50,23 @@ class ProbeSurfaceActionServer:
                 0.0,
             )
         )
-        self._second_probe_y_offset = float(rospy.get_param("~probe/second_probe_y_offset", 0.02))
-        self._inter_probe_backoff_distance = float(rospy.get_param("~probe/inter_probe_backoff_distance", 0.01))
-        self._surface_retract_distance = float(
-            rospy.get_param("~probe/surface_retract_distance", rospy.get_param("~probe/retract_distance", 0.005))
-        )
-        self._probe_timeout = float(rospy.get_param("~probe/probe_timeout", 10.0))
-        self._settle_time = float(rospy.get_param("~motion/action_settle_time", 0.4))
-        self._force_threshold_x = float(rospy.get_param("~contact/force_threshold_x", 2.0))
+        self._second_probe_y_offset = required_float_param("~probe/second_probe_y_offset")
+        self._inter_probe_backoff_distance = required_float_param("~probe/inter_probe_backoff_distance")
+        self._surface_retract_distance = required_float_param("~probe/surface_retract_distance")
+        self._probe_timeout = required_float_param("~probe/probe_timeout")
+        self._settle_time = required_float_param("~motion/action_settle_time")
+        self._force_threshold_x = required_float_param("~contact/force_threshold_x")
 
         self._robot = RobotInterface()
         self._tf = TFInterface()
         self._ft = FTInterface(
-            wrench_topic=rospy.get_param("~topics/wrench", "/wrench"),
-            filter_window_size=rospy.get_param("~contact/baseline_window", 20),
-            wrench_timeout=rospy.get_param("~contact/wrench_timeout", 0.2),
+            wrench_topic=required_str_param("~topics/wrench"),
+            filter_window_size=required_int_param("~contact/baseline_window"),
+            wrench_timeout=required_float_param("~contact/wrench_timeout"),
         )
         self._contact_detector = ContactDetector(
             self._ft,
-            hysteresis=rospy.get_param("~contact/hysteresis", 0.5),
+            hysteresis=required_float_param("~contact/hysteresis"),
         )
         self._wall_probe = WallProbe(self._robot, self._tf, self._contact_detector)
         self._move_client = actionlib.SimpleActionClient(self._move_action_name, MoveToPoseAction)

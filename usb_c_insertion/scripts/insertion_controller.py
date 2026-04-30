@@ -15,6 +15,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from ft_interface import FTInterface
+from param_utils import required_bool_param, required_float_param
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
 
@@ -45,31 +46,29 @@ class InsertionController:
         self._tf = tf_interface
         self._ft = ft_interface
 
-        self._command_rate = float(rospy.get_param("~motion/command_rate", 500.0))
-        self._insertion_depth = float(rospy.get_param("~insert/insertion_depth", 0.004))
-        self._contact_force_target = float(rospy.get_param("~insert/contact_force_target", 10.0))
-        self._contact_force_tolerance = float(rospy.get_param("~insert/contact_force_tolerance", 1.0))
-        self._force_control_gain = float(rospy.get_param("~insert/force_control_gain", 0.001))
-        self._force_control_speed_limit = float(rospy.get_param("~insert/force_control_speed_limit", 0.003))
-        self._force_control_timeout = float(rospy.get_param("~insert/force_control_timeout", 4.0))
-        self._force_target_oscillation_enabled = bool(
-            rospy.get_param("~insert/force_target_oscillation_enabled", False)
-        )
+        self._command_rate = required_float_param("~motion/command_rate")
+        self._insertion_depth = required_float_param("~insert/insertion_depth")
+        self._contact_force_target = required_float_param("~insert/contact_force_target")
+        self._contact_force_tolerance = required_float_param("~insert/contact_force_tolerance")
+        self._force_control_gain = required_float_param("~insert/force_control_gain")
+        self._force_control_speed_limit = required_float_param("~insert/force_control_speed_limit")
+        self._force_control_timeout = required_float_param("~insert/force_control_timeout")
+        self._force_target_oscillation_enabled = required_bool_param("~insert/force_target_oscillation_enabled")
         self._force_target_oscillation_frequency = max(
             0.0,
-            float(rospy.get_param("~insert/force_target_oscillation_frequency", 1.0)),
+            required_float_param("~insert/force_target_oscillation_frequency"),
         )
         self._force_target_min_ratio = max(
             0.0,
-            min(1.0, float(rospy.get_param("~insert/force_target_min_ratio", 0.0))),
+            min(1.0, required_float_param("~insert/force_target_min_ratio")),
         )
-        self._min_insertion_time = float(rospy.get_param("~insert/min_insertion_time", 0.0))
-        self._force_success_min_depth = float(rospy.get_param("~insert/force_success_min_depth", 0.0))
-        self._wiggle_enabled = bool(rospy.get_param("~insert/wiggle_enabled", False))
-        self._wiggle_speed_y = float(rospy.get_param("~insert/wiggle_speed_y", 0.0))
-        self._wiggle_speed_x = float(rospy.get_param("~insert/wiggle_speed_x", 0.0))
-        self._wiggle_frequency = max(0.0, float(rospy.get_param("~insert/wiggle_frequency", 2.0)))
-        self._release_force_threshold = float(rospy.get_param("~insert/release_force_threshold", 2.0))
+        self._min_insertion_time = required_float_param("~insert/min_insertion_time")
+        self._force_success_min_depth = required_float_param("~insert/force_success_min_depth")
+        self._wiggle_enabled = required_bool_param("~insert/wiggle_enabled")
+        self._wiggle_speed_y = required_float_param("~insert/wiggle_speed_y")
+        self._wiggle_speed_x = required_float_param("~insert/wiggle_speed_x")
+        self._wiggle_frequency = max(0.0, required_float_param("~insert/wiggle_frequency"))
+        self._release_force_threshold = required_float_param("~insert/release_force_threshold")
 
     def insert_until_depth(
         self,

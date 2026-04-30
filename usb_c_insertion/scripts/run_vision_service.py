@@ -14,6 +14,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
+from param_utils import required_float_param, required_str_param
 from vision_pose_loader import load_vision_pose_from_json
 from usb_c_insertion.srv import RunVision, RunVisionResponse
 
@@ -28,12 +29,12 @@ class RunVisionServiceNode:
     """
 
     def __init__(self):
-        self._service_name = str(rospy.get_param("~service_name", "run_vision")).strip()
-        self._script_path = str(rospy.get_param("~run_vision_script_path", "")).strip()
-        self._json_path = str(rospy.get_param("~vision_pose_json_path", "")).strip()
-        self._command_timeout = float(rospy.get_param("~run_vision_timeout", 180.0))
-        self._result_wait_timeout = float(rospy.get_param("~vision_result_wait_timeout", 5.0))
-        self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link"))
+        self._service_name = "run_vision"
+        self._script_path = required_str_param("~run_vision_script_path")
+        self._json_path = required_str_param("~vision_pose_json_path")
+        self._command_timeout = required_float_param("~workflow/run_vision_timeout")
+        self._result_wait_timeout = required_float_param("~workflow/vision_result_wait_timeout")
+        self._base_frame = required_str_param("~frames/base_frame")
 
         self._service = rospy.Service(self._service_name, RunVision, self._handle_request)
         rospy.loginfo(

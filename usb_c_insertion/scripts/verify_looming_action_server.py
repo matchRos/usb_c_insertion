@@ -20,6 +20,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
+from param_utils import required_float_param, required_int_param, required_str_param, required_vector_param
 from prepose_planner import rotate_vector_by_quaternion
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
@@ -53,33 +54,27 @@ class VerifyLoomingActionServer:
     """
 
     def __init__(self):
-        self._action_name = str(rospy.get_param("~looming/action_name", "verify_looming")).strip()
-        self._default_image_topic = str(
-            rospy.get_param("~looming/image_topic", "/zedm/zed_node/left/image_rect_color")
-        ).strip()
-        self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link")).strip()
-        self._command_rate = max(1.0, float(rospy.get_param("~looming/command_rate", 40.0)))
-        self._default_travel_distance = float(rospy.get_param("~looming/travel_distance", 0.025))
-        self._default_travel_speed = float(rospy.get_param("~looming/travel_speed", 0.006))
-        self._default_timeout = float(rospy.get_param("~looming/timeout", 8.0))
-        self._default_min_blob_area = float(rospy.get_param("~looming/min_blob_area", 120.0))
-        self._default_min_scale_ratio = float(rospy.get_param("~looming/min_scale_ratio", 1.12))
-        self._default_max_center_shift_px = float(rospy.get_param("~looming/max_center_shift_px", 10.0))
-        self._default_max_aspect_ratio_change = float(
-            rospy.get_param("~looming/max_aspect_ratio_change", 0.35)
-        )
-        self._default_tool_z_direction_sign = float(rospy.get_param("~looming/tool_z_direction_sign", 1.0))
-        self._max_image_age = float(rospy.get_param("~looming/max_image_age", 0.5))
-        self._max_lost_time = float(rospy.get_param("~looming/max_lost_time", 0.5))
+        self._action_name = required_str_param("~looming/action_name")
+        self._default_image_topic = required_str_param("~looming/image_topic")
+        self._base_frame = required_str_param("~frames/base_frame")
+        self._command_rate = max(1.0, required_float_param("~looming/command_rate"))
+        self._default_travel_distance = required_float_param("~looming/travel_distance")
+        self._default_travel_speed = required_float_param("~looming/travel_speed")
+        self._default_timeout = required_float_param("~looming/timeout")
+        self._default_min_blob_area = required_float_param("~looming/min_blob_area")
+        self._default_min_scale_ratio = required_float_param("~looming/min_scale_ratio")
+        self._default_max_center_shift_px = required_float_param("~looming/max_center_shift_px")
+        self._default_max_aspect_ratio_change = required_float_param("~looming/max_aspect_ratio_change")
+        self._default_tool_z_direction_sign = required_float_param("~looming/tool_z_direction_sign")
+        self._max_image_age = required_float_param("~looming/max_image_age")
+        self._max_lost_time = required_float_param("~looming/max_lost_time")
         self._image_rotation_deg = self._normalize_image_rotation_deg(
-            float(rospy.get_param("~looming/image_rotation_deg", 0.0))
+            required_float_param("~looming/image_rotation_deg")
         )
-        self._hsv_lower = self._read_hsv_param("~looming/hsv_lower", (35, 70, 40))
-        self._hsv_upper = self._read_hsv_param("~looming/hsv_upper", (90, 255, 255))
-        self._morph_kernel_size = max(0, int(rospy.get_param("~looming/morph_kernel_size", 5)))
-        self._motion_pipeline_wait_timeout = float(
-            rospy.get_param("~motion/action_pipeline_wait_timeout", 2.0)
-        )
+        self._hsv_lower = self._read_hsv_param("~looming/hsv_lower")
+        self._hsv_upper = self._read_hsv_param("~looming/hsv_upper")
+        self._morph_kernel_size = max(0, required_int_param("~looming/morph_kernel_size"))
+        self._motion_pipeline_wait_timeout = required_float_param("~motion/action_pipeline_wait_timeout")
 
         self._robot = RobotInterface()
         self._tf = TFInterface()
@@ -561,11 +556,11 @@ class VerifyLoomingActionServer:
         return float(value) if float(value) > 0.0 else float(default)
 
     @staticmethod
-    def _read_hsv_param(param_name: str, default_value) -> Tuple[int, int, int]:
-        value = rospy.get_param(param_name, list(default_value))
+    def _read_hsv_param(param_name: str) -> Tuple[int, int, int]:
+        value = required_vector_param(param_name)
         if not isinstance(value, (list, tuple)) or len(value) != 3:
             rospy.logwarn("[usb_c_insertion] event=verify_looming_invalid_hsv_param param=%s", param_name)
-            value = default_value
+            raise ValueError("Invalid HSV ROS parameter: %s" % rospy.resolve_name(param_name))
         return tuple(max(0, min(255, int(component))) for component in value)
 
     @staticmethod

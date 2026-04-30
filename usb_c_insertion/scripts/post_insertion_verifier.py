@@ -15,6 +15,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from ft_interface import FTInterface, WrenchData
+from param_utils import required_float_param
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
 
@@ -46,14 +47,14 @@ class PostInsertionVerifier:
         self._tf = tf_interface
         self._ft = ft_interface
 
-        self._command_rate = float(rospy.get_param("~motion/command_rate", 100.0))
-        self._position_tolerance = float(rospy.get_param("~motion/pose_servo_position_tolerance", 0.0015))
-        self._move_distance_y = float(rospy.get_param("~verify/move_distance_y", 0.0001))
-        self._move_distance_z = float(rospy.get_param("~verify/move_distance_z", 0.0001))
-        self._move_timeout = float(rospy.get_param("~verify/move_timeout", 2.0))
-        self._counterforce_threshold_y = float(rospy.get_param("~verify/counterforce_threshold_y", 5.0))
-        self._counterforce_threshold_z = float(rospy.get_param("~verify/counterforce_threshold_z", 5.0))
-        self._settle_time = float(rospy.get_param("~verify/settle_time", 0.1))
+        self._command_rate = required_float_param("~motion/command_rate")
+        self._position_tolerance = required_float_param("~motion/pose_servo_position_tolerance")
+        self._move_distance_y = required_float_param("~verify/move_distance_y")
+        self._move_distance_z = required_float_param("~verify/move_distance_z")
+        self._move_timeout = required_float_param("~verify/move_timeout")
+        self._counterforce_threshold_y = required_float_param("~verify/counterforce_threshold_y")
+        self._counterforce_threshold_z = required_float_param("~verify/counterforce_threshold_z")
+        self._settle_time = required_float_param("~verify/settle_time")
 
     def verify_retention(self, move_timeout: Optional[float] = None) -> PostInsertionVerificationResult:
         """

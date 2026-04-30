@@ -16,6 +16,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
+from param_utils import required_bool_param, required_float_param, required_str_param
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
 from usb_c_insertion.msg import (
@@ -39,22 +40,20 @@ class MicroMoveActionServer:
     _MAX_SMOOTHSTEP_JERK = 52.5
 
     def __init__(self):
-        self._action_name = str(rospy.get_param("~action_name", "micro_move")).strip()
-        self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link")).strip()
-        self._twist_topic = str(rospy.get_param("~topics/twist_cmd", "/twist_controller/command")).strip()
-        self._active_topic = str(
-            rospy.get_param("~topics/micro_motion_active", "/usb_c_insertion/micro_motion_active")
-        ).strip()
+        self._action_name = "micro_move"
+        self._base_frame = required_str_param("~frames/base_frame")
+        self._twist_topic = required_str_param("~topics/twist_cmd")
+        self._active_topic = required_str_param("~topics/micro_motion_active")
 
-        self._command_rate = float(rospy.get_param("~motion/command_rate", 500.0))
-        self._max_distance = float(rospy.get_param("~micro_motion/max_distance", 0.02))
-        self._default_max_velocity = float(rospy.get_param("~micro_motion/max_velocity", 0.04))
-        self._default_max_acceleration = float(rospy.get_param("~micro_motion/max_acceleration", 0.5))
-        self._default_max_jerk = float(rospy.get_param("~micro_motion/max_jerk", 20.0))
-        self._min_duration = float(rospy.get_param("~micro_motion/min_duration", 0.04))
-        self._max_duration = float(rospy.get_param("~micro_motion/max_duration", 1.0))
-        self._default_monitor_tf = bool(rospy.get_param("~micro_motion/monitor_tf", True))
-        self._max_overshoot = float(rospy.get_param("~micro_motion/max_overshoot", 0.001))
+        self._command_rate = required_float_param("~motion/command_rate")
+        self._max_distance = required_float_param("~micro_motion/max_distance")
+        self._default_max_velocity = required_float_param("~micro_motion/max_velocity")
+        self._default_max_acceleration = required_float_param("~micro_motion/max_acceleration")
+        self._default_max_jerk = required_float_param("~micro_motion/max_jerk")
+        self._min_duration = required_float_param("~micro_motion/min_duration")
+        self._max_duration = required_float_param("~micro_motion/max_duration")
+        self._default_monitor_tf = required_bool_param("~micro_motion/monitor_tf")
+        self._max_overshoot = required_float_param("~micro_motion/max_overshoot")
 
         self._tf = TFInterface()
         self._robot = RobotInterface()

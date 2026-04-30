@@ -12,6 +12,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
+from param_utils import required_float_param, required_str_param
 from prepose_planner import compute_port_frame_target, compute_tcp_target_orientation, tool_offset_to_port_offset
 from tf_interface import TFInterface
 from usb_c_insertion.srv import ComputePrePose, ComputePrePoseResponse
@@ -19,41 +20,11 @@ from usb_c_insertion.srv import ComputePrePose, ComputePrePoseResponse
 
 class ComputePrePoseServiceNode:
     def __init__(self):
-        self._service_name = str(rospy.get_param("~service_name", "compute_prepose")).strip()
-        self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link"))
-        self._target_offset_tool_x = float(
-            rospy.get_param(
-                "~state_machine/target_offset_tool_x",
-                rospy.get_param(
-                    "~state_machine/probe_offset_tool_x",
-                    rospy.get_param(
-                        "~state_machine/prepose_offset_tool_x",
-                        -float(rospy.get_param("~state_machine/prepose_offset_port_y", 0.0)),
-                    ),
-                ),
-            )
-        )
-        self._target_offset_tool_y = float(
-            rospy.get_param(
-                "~state_machine/target_offset_tool_y",
-                rospy.get_param(
-                    "~state_machine/probe_offset_tool_y",
-                    rospy.get_param(
-                        "~state_machine/prepose_offset_tool_y",
-                        float(rospy.get_param("~state_machine/prepose_offset_port_z", 0.0)),
-                    ),
-                ),
-            )
-        )
-        if rospy.has_param("~state_machine/prepose_offset"):
-            self._prepose_offset = float(rospy.get_param("~state_machine/prepose_offset"))
-        else:
-            self._prepose_offset = float(
-                rospy.get_param(
-                    "~state_machine/prepose_offset_tool_z",
-                    -float(rospy.get_param("~state_machine/prepose_offset_port_x", -0.03)),
-                )
-            )
+        self._service_name = "compute_prepose"
+        self._base_frame = required_str_param("~frames/base_frame")
+        self._target_offset_tool_x = required_float_param("~state_machine/target_offset_tool_x")
+        self._target_offset_tool_y = required_float_param("~state_machine/target_offset_tool_y")
+        self._prepose_offset = required_float_param("~state_machine/prepose_offset")
         self._offset_x, self._offset_y, self._offset_z = tool_offset_to_port_offset(
             (self._target_offset_tool_x, self._target_offset_tool_y, self._prepose_offset)
         )

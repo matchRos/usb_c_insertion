@@ -189,6 +189,7 @@ catkin_install_python(PROGRAMS
   scripts/insert_cable_action_server.py
   scripts/move_to_pose_action_server.py
   scripts/micro_move_action_server.py
+  scripts/param_utils.py
   scripts/preinsert_alignment_workflow.py
   scripts/preinsert_workflow_helpers.py
   scripts/pose_servo_node.py

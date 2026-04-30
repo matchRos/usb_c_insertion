@@ -53,8 +53,8 @@ class PreinsertWorkflowHelpers:
         self.base_frame = self._required_str_param("~frames/base_frame")
         self.tool_frame = self._required_str_param("~frames/tool_frame")
 
-        self._move_action_name = self._required_str_param("~workflow/move_action_name")
-        self._vision_service_name = self._required_str_param("~workflow/vision_service_name")
+        self._move_action_name = "move_to_pose"
+        self._vision_service_name = "run_vision"
         self._align_action_name = self._required_str_param("~align_housing_yaw/action_name")
         self._center_action_name = self._required_str_param("~center_port/action_name")
         self._estimate_action_name = self._required_str_param("~housing_plane/action_name")
@@ -91,12 +91,12 @@ class PreinsertWorkflowHelpers:
 
     def _mirror_global_config_to_private_namespace(self) -> None:
         """
-        Let manually started workflows use YAML loaded globally by launch_ur.
+        Keep the workflow's private params in sync with global launch config.
 
-        The roslaunch workflow loads params privately, which matches all
-        `~...` lookups. If the workflow is started with rosrun, only global
-        `/state_machine`, `/align_housing_yaw`, etc. may exist, so copy them
-        into this node's private namespace when no private namespace exists.
+        ROS params survive node restarts. A manually started workflow may have
+        stale private `/usb_c_insertion_preinsert_alignment_workflow/...`
+        params from an older run, so refresh private config from the global
+        YAML namespaces whenever those globals exist.
         """
         namespaces = (
             "frames",
@@ -122,9 +122,12 @@ class PreinsertWorkflowHelpers:
         for namespace in namespaces:
             private_name = "~%s" % namespace
             global_name = "/%s" % namespace
-            if rospy.has_param(private_name) or not rospy.has_param(global_name):
+            if not rospy.has_param(global_name):
                 continue
-            rospy.set_param(private_name, rospy.get_param(global_name))
+            global_value = rospy.get_param(global_name)
+            if rospy.has_param(private_name) and rospy.get_param(private_name) == global_value:
+                continue
+            rospy.set_param(private_name, global_value)
             mirrored.append(namespace)
         if mirrored:
             rospy.loginfo(
@@ -137,10 +140,17 @@ class PreinsertWorkflowHelpers:
         if rospy.has_param(name):
             return rospy.get_param(name)
         resolved_name = rospy.resolve_name(name)
+        global_name = None
+        global_available = False
+        if name.startswith("~"):
+            global_name = "/" + name[1:].lstrip("/")
+            global_available = rospy.has_param(global_name)
         rospy.logerr(
-            "[usb_c_insertion] event=preinsert_missing_required_param param=%s resolved_param=%s",
+            "[usb_c_insertion] event=preinsert_missing_required_param param=%s resolved_param=%s global_param=%s global_available=%s",
             name,
             resolved_name,
+            global_name or "",
+            str(global_available).lower(),
         )
         raise RuntimeError("Missing required ROS parameter: %s (%s)" % (name, resolved_name))
 

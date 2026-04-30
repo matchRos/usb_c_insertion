@@ -15,6 +15,13 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
+from param_utils import (
+    required_bool_param,
+    required_float_param,
+    required_int_param,
+    required_str_param,
+    required_vector_param,
+)
 from prepose_planner import normalize_quaternion, quaternion_from_yaw, quaternion_multiply, rotate_vector_by_quaternion
 from tf_interface import TFInterface
 from usb_c_insertion.msg import (
@@ -40,34 +47,24 @@ class AlignHousingYawActionServer:
     def __init__(self):
         self._mirror_global_config_to_private_namespace()
 
-        self._action_name = str(rospy.get_param("~align_housing_yaw/action_name", "align_housing_yaw")).strip()
-        self._estimate_action_name = str(
-            rospy.get_param("~align_housing_yaw/estimate_action_name", "estimate_housing_plane")
-        ).strip()
-        self._move_action_name = str(rospy.get_param("~align_housing_yaw/move_action_name", "move_to_pose")).strip()
-        self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link")).strip()
+        self._action_name = required_str_param("~align_housing_yaw/action_name")
+        self._estimate_action_name = required_str_param("~align_housing_yaw/estimate_action_name")
+        self._move_action_name = required_str_param("~align_housing_yaw/move_action_name")
+        self._base_frame = required_str_param("~frames/base_frame")
 
-        self._default_image_topic = str(
-            rospy.get_param("~housing_plane/image_topic", "/zedm/zed_node/left/image_rect_color")
-        ).strip()
-        self._default_cloud_topic = str(
-            rospy.get_param("~housing_plane/cloud_topic", "/zedm/zed_node/point_cloud/cloud_registered")
-        ).strip()
-        self._default_estimate_timeout = float(rospy.get_param("~align_housing_yaw/estimate_timeout", 3.0))
-        self._default_yaw_tolerance_rad = float(rospy.get_param("~align_housing_yaw/yaw_tolerance_rad", 0.0175))
-        self._default_max_iterations = int(rospy.get_param("~align_housing_yaw/max_iterations", 10))
-        self._default_max_yaw_step_rad = float(rospy.get_param("~align_housing_yaw/max_yaw_step_rad", 0.25))
-        self._default_settle_time = float(
-            rospy.get_param("~align_housing_yaw/settle_time", rospy.get_param("~motion/action_settle_time", 0.15))
-        )
-        self._default_move_timeout = float(
-            rospy.get_param("~align_housing_yaw/move_timeout", rospy.get_param("~motion/action_timeout", 20.0))
-        )
-        self._estimate_wait_timeout = float(rospy.get_param("~align_housing_yaw/estimate_wait_timeout", 5.0))
-        self._move_wait_timeout = float(rospy.get_param("~align_housing_yaw/move_wait_timeout", 5.0))
-        self._tool_axis = self._read_vector_param("~align_housing_yaw/tool_axis", (0.0, 0.0, 1.0))
-        self._target_axis_from_plane_normal_sign = float(
-            rospy.get_param("~align_housing_yaw/target_axis_from_plane_normal_sign", -1.0)
+        self._default_image_topic = required_str_param("~align_housing_yaw/image_topic")
+        self._default_cloud_topic = required_str_param("~align_housing_yaw/cloud_topic")
+        self._default_estimate_timeout = required_float_param("~align_housing_yaw/estimate_timeout")
+        self._default_yaw_tolerance_rad = required_float_param("~align_housing_yaw/yaw_tolerance_rad")
+        self._default_max_iterations = required_int_param("~align_housing_yaw/max_iterations")
+        self._default_max_yaw_step_rad = required_float_param("~align_housing_yaw/max_yaw_step_rad")
+        self._default_settle_time = required_float_param("~align_housing_yaw/settle_time")
+        self._default_move_timeout = required_float_param("~align_housing_yaw/move_timeout")
+        self._estimate_wait_timeout = required_float_param("~align_housing_yaw/estimate_wait_timeout")
+        self._move_wait_timeout = required_float_param("~align_housing_yaw/move_wait_timeout")
+        self._tool_axis = self._read_vector_param("~align_housing_yaw/tool_axis")
+        self._target_axis_from_plane_normal_sign = required_float_param(
+            "~align_housing_yaw/target_axis_from_plane_normal_sign"
         )
 
         self._tf = TFInterface()
@@ -310,15 +307,15 @@ class AlignHousingYawActionServer:
         goal.image_topic = image_topic
         goal.cloud_topic = cloud_topic
         goal.timeout = float(timeout)
-        goal.min_blob_area = float(rospy.get_param("~housing_plane/min_blob_area", 120.0))
-        goal.roi_radius_px = int(rospy.get_param("~housing_plane/roi_radius_px", 70))
-        goal.roi_stride_px = int(rospy.get_param("~housing_plane/roi_stride_px", 2))
-        goal.depth_window_m = float(rospy.get_param("~housing_plane/depth_window_m", 0.06))
-        goal.ransac_iterations = int(rospy.get_param("~housing_plane/ransac_iterations", 120))
-        goal.ransac_distance_threshold = float(rospy.get_param("~housing_plane/ransac_distance_threshold", 0.004))
-        goal.min_inliers = int(rospy.get_param("~housing_plane/min_inliers", 120))
-        goal.use_svd_refit = bool(rospy.get_param("~housing_plane/use_svd_refit", True))
-        goal.use_largest_component = bool(rospy.get_param("~housing_plane/use_largest_component", True))
+        goal.min_blob_area = required_float_param("~housing_plane/min_blob_area")
+        goal.roi_radius_px = required_int_param("~housing_plane/roi_radius_px")
+        goal.roi_stride_px = required_int_param("~housing_plane/roi_stride_px")
+        goal.depth_window_m = required_float_param("~housing_plane/depth_window_m")
+        goal.ransac_iterations = required_int_param("~housing_plane/ransac_iterations")
+        goal.ransac_distance_threshold = required_float_param("~housing_plane/ransac_distance_threshold")
+        goal.min_inliers = required_int_param("~housing_plane/min_inliers")
+        goal.use_svd_refit = required_bool_param("~housing_plane/use_svd_refit")
+        goal.use_largest_component = required_bool_param("~housing_plane/use_largest_component")
         self._estimate_client.send_goal(goal)
         finished = self._estimate_client.wait_for_result(rospy.Duration.from_sec(max(0.1, float(timeout) + 2.0)))
         if not finished:
@@ -504,17 +501,16 @@ class AlignHousingYawActionServer:
         return int(value) if int(value) > 0 else int(default)
 
     @staticmethod
-    def _read_vector_param(param_name: str, default_xyz):
-        value = rospy.get_param(param_name, default_xyz)
+    def _read_vector_param(param_name: str):
+        value = required_vector_param(param_name)
         if not isinstance(value, (list, tuple)) or len(value) != 3:
             rospy.logwarn("[usb_c_insertion] event=align_housing_yaw_invalid_vector_param param=%s", param_name)
-            value = default_xyz
+            raise ValueError("Invalid vector ROS parameter: %s" % rospy.resolve_name(param_name))
         vector = tuple(float(component) for component in value)
         norm = math.sqrt(sum(component * component for component in vector))
         if norm <= 1e-9:
             rospy.logwarn("[usb_c_insertion] event=align_housing_yaw_zero_vector_param param=%s", param_name)
-            vector = tuple(float(component) for component in default_xyz)
-            norm = math.sqrt(sum(component * component for component in vector))
+            raise ValueError("Zero-length vector ROS parameter: %s" % rospy.resolve_name(param_name))
         return tuple(component / norm for component in vector)
 
 

@@ -20,10 +20,12 @@ motion:
   pose_servo_target_timeout: 15.0
   action_settle_time: 0.15
   action_timeout: 60.0
+  action_feedback_rate: 20.0
   action_pipeline_wait_timeout: 2.0
   enforce_workspace_limits: true
   min_target_x: 0.0
   min_target_z: 0.0
+  stop_repeat_count: 3
   command_rate: 500.0
 
 micro_motion:
@@ -41,8 +43,10 @@ contact:
   force_threshold_x: 2.0
   force_threshold_y: 2.0
   force_threshold_z: 2.0
+  force_threshold_norm: 5.0
   torque_threshold: 0.2
   wrench_timeout: 0.2
+  hysteresis: 0.5
 
 probe:
   retract_distance: 0.005
@@ -170,6 +174,8 @@ align_housing_yaw:
   max_yaw_step_rad: 0.25
   settle_time: 0.15
   move_timeout: 20.0
+  estimate_wait_timeout: 5.0
+  move_wait_timeout: 5.0
   tool_axis: [0.0, 0.0, 1.0]
   target_axis_from_plane_normal_sign: -1.0
 
@@ -242,12 +248,14 @@ photo_pose:
 
 state_machine:
   auto_zero_ft: true
-  target_offset_tool_x: -0.0195
-  target_offset_tool_y: -0.006
+  target_offset_tool_x: +0.0
+  target_offset_tool_y: +0.0
   prepose_offset: -0.01
   precontact_offset_tool_x: -0.000
   precontact_offset_tool_y: 0.000
   precontact_offset_tool_z: -0.015
+  probe_offset_tool_x: 0.0
+  probe_offset_tool_y: 0.0
   enforce_precontact_standoff: true
   min_precontact_standoff: 0.008
   prepose_speed: 0.035
@@ -255,8 +263,8 @@ state_machine:
   position_tolerance: 0.002
 
 workflow:
-  move_action_name: "move_to_pose"
-  vision_service_name: "run_vision"
+  run_vision_timeout: 180.0
+  vision_result_wait_timeout: 5.0
   refine_camera_frame: "usb_c_zedm_left_camera_optical_frame"
   refine_camera_distance: 0.18
   refine_yaw_delta_sign: 1.0

@@ -20,6 +20,13 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
+from param_utils import (
+    required_bool_param,
+    required_float_param,
+    required_int_param,
+    required_str_param,
+    required_vector_param,
+)
 from prepose_planner import rotate_vector_by_quaternion
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
@@ -61,67 +68,47 @@ class CenterPortInImageActionServer:
     """
 
     def __init__(self):
-        self._action_name = str(rospy.get_param("~center_port/action_name", "center_port_in_image")).strip()
-        self._default_image_topic = str(
-            rospy.get_param("~center_port/image_topic", "/zedm/zed_node/left/image_rect_color")
-        ).strip()
-        self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link")).strip()
-        self._command_rate = max(1.0, float(rospy.get_param("~center_port/command_rate", 20.0)))
-        self._default_timeout = float(rospy.get_param("~center_port/timeout", 10.0))
-        self._default_pixel_tolerance = float(rospy.get_param("~center_port/pixel_tolerance", 12.0))
-        self._default_stable_time = float(rospy.get_param("~center_port/stable_time", 0.35))
-        self._default_max_velocity = float(rospy.get_param("~center_port/max_velocity", 0.006))
-        self._default_gain = float(rospy.get_param("~center_port/gain", 0.00002))
-        self._default_min_blob_area = float(rospy.get_param("~center_port/min_blob_area", 120.0))
-        self._max_acceleration = max(0.0, float(rospy.get_param("~center_port/max_acceleration", 0.03)))
+        self._action_name = required_str_param("~center_port/action_name")
+        self._default_image_topic = required_str_param("~center_port/image_topic")
+        self._base_frame = required_str_param("~frames/base_frame")
+        self._command_rate = max(1.0, required_float_param("~center_port/command_rate"))
+        self._default_timeout = required_float_param("~center_port/timeout")
+        self._default_pixel_tolerance = required_float_param("~center_port/pixel_tolerance")
+        self._default_stable_time = required_float_param("~center_port/stable_time")
+        self._default_max_velocity = required_float_param("~center_port/max_velocity")
+        self._default_gain = required_float_param("~center_port/gain")
+        self._default_min_blob_area = required_float_param("~center_port/min_blob_area")
+        self._max_acceleration = max(0.0, required_float_param("~center_port/max_acceleration"))
         self._output_smoothing_alpha = max(
             0.0,
-            min(1.0, float(rospy.get_param("~center_port/output_smoothing_alpha", 0.35))),
+            min(1.0, required_float_param("~center_port/output_smoothing_alpha")),
         )
-        self._max_image_age = float(rospy.get_param("~center_port/max_image_age", 0.5))
-        self._max_lost_time = float(rospy.get_param("~center_port/max_lost_time", 1.0))
+        self._max_image_age = required_float_param("~center_port/max_image_age")
+        self._max_lost_time = required_float_param("~center_port/max_lost_time")
         self._image_rotation_deg = self._normalize_image_rotation_deg(
-            float(rospy.get_param("~center_port/image_rotation_deg", 0.0))
+            required_float_param("~center_port/image_rotation_deg")
         )
         self._image_to_tool_rotation_rad = math.radians(
-            float(rospy.get_param("~center_port/image_to_tool_rotation_deg", 0.0))
+            required_float_param("~center_port/image_to_tool_rotation_deg")
         )
-        self._image_error_to_tool_x_sign = float(
-            rospy.get_param("~center_port/image_error_to_tool_x_sign", 1.0)
+        self._image_error_to_tool_x_sign = required_float_param("~center_port/image_error_to_tool_x_sign")
+        self._image_error_to_tool_y_sign = required_float_param("~center_port/image_error_to_tool_y_sign")
+        self._hsv_lower = self._read_hsv_param("~center_port/hsv_lower")
+        self._hsv_upper = self._read_hsv_param("~center_port/hsv_upper")
+        self._morph_kernel_size = max(0, required_int_param("~center_port/morph_kernel_size"))
+        self._motion_pipeline_wait_timeout = required_float_param("~motion/action_pipeline_wait_timeout")
+        self._pose_servo_status_topic = required_str_param("~topics/pose_servo_status")
+        self._coarse_pose_servo_enabled = required_bool_param("~center_port/coarse_pose_servo_enabled")
+        self._coarse_pose_servo_pixel_tolerance = required_float_param(
+            "~center_port/coarse_pose_servo_pixel_tolerance"
         )
-        self._image_error_to_tool_y_sign = float(
-            rospy.get_param("~center_port/image_error_to_tool_y_sign", 1.0)
+        self._coarse_pose_servo_position_gain = required_float_param("~center_port/coarse_pose_servo_position_gain")
+        self._coarse_pose_servo_max_step = required_float_param("~center_port/coarse_pose_servo_max_step")
+        self._coarse_pose_servo_timeout = required_float_param("~center_port/coarse_pose_servo_timeout")
+        self._coarse_pose_servo_position_tolerance = required_float_param(
+            "~center_port/coarse_pose_servo_position_tolerance"
         )
-        self._hsv_lower = self._read_hsv_param("~center_port/hsv_lower", (35, 70, 40))
-        self._hsv_upper = self._read_hsv_param("~center_port/hsv_upper", (90, 255, 255))
-        self._morph_kernel_size = max(0, int(rospy.get_param("~center_port/morph_kernel_size", 5)))
-        self._motion_pipeline_wait_timeout = float(
-            rospy.get_param("~motion/action_pipeline_wait_timeout", 2.0)
-        )
-        self._pose_servo_status_topic = str(
-            rospy.get_param("~topics/pose_servo_status", "/usb_c_insertion/pose_servo_status")
-        ).strip()
-        self._coarse_pose_servo_enabled = bool(
-            rospy.get_param("~center_port/coarse_pose_servo_enabled", True)
-        )
-        self._coarse_pose_servo_pixel_tolerance = float(
-            rospy.get_param("~center_port/coarse_pose_servo_pixel_tolerance", 35.0)
-        )
-        self._coarse_pose_servo_position_gain = float(
-            rospy.get_param("~center_port/coarse_pose_servo_position_gain", 0.00005)
-        )
-        self._coarse_pose_servo_max_step = float(
-            rospy.get_param("~center_port/coarse_pose_servo_max_step", 0.025)
-        )
-        self._coarse_pose_servo_timeout = float(
-            rospy.get_param("~center_port/coarse_pose_servo_timeout", 2.0)
-        )
-        self._coarse_pose_servo_position_tolerance = float(
-            rospy.get_param("~center_port/coarse_pose_servo_position_tolerance", 0.002)
-        )
-        self._coarse_pose_servo_max_iterations = int(
-            rospy.get_param("~center_port/coarse_pose_servo_max_iterations", 3)
-        )
+        self._coarse_pose_servo_max_iterations = required_int_param("~center_port/coarse_pose_servo_max_iterations")
 
         self._robot = RobotInterface()
         self._tf = TFInterface()
@@ -941,11 +928,11 @@ class CenterPortInImageActionServer:
         return float(value) if float(value) > 0.0 else float(default)
 
     @staticmethod
-    def _read_hsv_param(param_name: str, default_value) -> Tuple[int, int, int]:
-        value = rospy.get_param(param_name, list(default_value))
+    def _read_hsv_param(param_name: str) -> Tuple[int, int, int]:
+        value = required_vector_param(param_name)
         if not isinstance(value, (list, tuple)) or len(value) != 3:
             rospy.logwarn("[usb_c_insertion] event=center_port_invalid_hsv_param param=%s", param_name)
-            value = default_value
+            raise ValueError("Invalid HSV ROS parameter: %s" % rospy.resolve_name(param_name))
         return tuple(max(0, min(255, int(component))) for component in value)
 
     @staticmethod

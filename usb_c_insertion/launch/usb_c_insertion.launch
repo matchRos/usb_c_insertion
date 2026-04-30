@@ -3,6 +3,10 @@
   <arg name="publish_vision_pose_only" default="false" />
   <arg name="run_vision_script_path" default="$(find usb_c_insertion)/scripts/run_vision.sh" />
 
+  <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
+  <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
+  <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+
   <node unless="$(arg publish_vision_pose_only)"
         pkg="usb_c_insertion"
         type="center_port_in_image_action_server.py"
@@ -109,6 +113,7 @@
         name="usb_c_insertion_run_vision_service"
         output="screen">
     <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
     <param name="run_vision_script_path" value="$(arg run_vision_script_path)" />
     <param name="vision_pose_json_path" value="$(arg vision_pose_json_path)" />
   </node>

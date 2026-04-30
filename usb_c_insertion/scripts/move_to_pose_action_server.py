@@ -14,6 +14,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
+from param_utils import required_bool_param, required_float_param, required_str_param
 from robot_interface import RobotInterface
 from usb_c_insertion.msg import (
     MoveToPoseAction,
@@ -33,28 +34,16 @@ class MoveToPoseActionServer:
     """
 
     def __init__(self):
-        self._action_name = str(rospy.get_param("~action_name", "move_to_pose")).strip()
-        self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link")).strip()
-        self._default_settle_time = float(
-            rospy.get_param("~motion/action_settle_time", 0.4)
-        )
-        self._default_timeout = float(
-            rospy.get_param("~motion/action_timeout", 60.0)
-        )
-        self._feedback_rate = float(
-            rospy.get_param("~motion/action_feedback_rate", 20.0)
-        )
-        self._pipeline_wait_timeout = float(
-            rospy.get_param("~motion/action_pipeline_wait_timeout", 2.0)
-        )
-        self._enforce_workspace_limits = bool(
-            rospy.get_param("~motion/enforce_workspace_limits", True)
-        )
-        self._min_target_x = float(rospy.get_param("~motion/min_target_x", 0.0))
-        self._min_target_z = float(rospy.get_param("~motion/min_target_z", 0.0))
-        self._status_topic = str(
-            rospy.get_param("~topics/pose_servo_status", "/usb_c_insertion/pose_servo_status")
-        ).strip()
+        self._action_name = "move_to_pose"
+        self._base_frame = required_str_param("~frames/base_frame")
+        self._default_settle_time = required_float_param("~motion/action_settle_time")
+        self._default_timeout = required_float_param("~motion/action_timeout")
+        self._feedback_rate = required_float_param("~motion/action_feedback_rate")
+        self._pipeline_wait_timeout = required_float_param("~motion/action_pipeline_wait_timeout")
+        self._enforce_workspace_limits = required_bool_param("~motion/enforce_workspace_limits")
+        self._min_target_x = required_float_param("~motion/min_target_x")
+        self._min_target_z = required_float_param("~motion/min_target_z")
+        self._status_topic = required_str_param("~topics/pose_servo_status")
 
         self._robot = RobotInterface()
         self._latest_status: Optional[PoseServoStatus] = None

@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import math
+import os
+import sys
 
 from geometry_msgs.msg import Twist
 import rospy
 from std_msgs.msg import Bool
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
+from param_utils import required_float_param, required_str_param
 
 
 class TwistControllerNode:
@@ -19,20 +27,17 @@ class TwistControllerNode:
     """
 
     def __init__(self):
-        self._input_topic = rospy.get_param("~topics/raw_twist_cmd", "/usb_c_insertion/raw_twist_cmd")
-        self._output_topic = rospy.get_param("~topics/twist_cmd", "/twist_controller/command")
-        self._micro_motion_active_topic = rospy.get_param(
-            "~topics/micro_motion_active",
-            "/usb_c_insertion/micro_motion_active",
-        )
+        self._input_topic = required_str_param("~topics/raw_twist_cmd")
+        self._output_topic = required_str_param("~topics/twist_cmd")
+        self._micro_motion_active_topic = required_str_param("~topics/micro_motion_active")
 
-        self._command_rate = float(rospy.get_param("~motion/command_rate", 500.0))
-        self._watchdog_timeout = float(rospy.get_param("~motion/watchdog_timeout", 0.1))
-        self._max_linear_speed = float(rospy.get_param("~motion/max_linear_speed", 0.1))
-        self._max_angular_speed = float(rospy.get_param("~motion/max_angular_speed", 0.25))
-        self._max_linear_acceleration = float(rospy.get_param("~motion/max_linear_acceleration", 0.03))
-        self._max_angular_acceleration = float(rospy.get_param("~motion/max_angular_acceleration", 0.15))
-        self._twist_alpha = float(rospy.get_param("~motion/twist_smoothing_alpha", 0.25))
+        self._command_rate = required_float_param("~motion/command_rate")
+        self._watchdog_timeout = required_float_param("~motion/watchdog_timeout")
+        self._max_linear_speed = required_float_param("~motion/max_linear_speed")
+        self._max_angular_speed = required_float_param("~motion/max_angular_speed")
+        self._max_linear_acceleration = required_float_param("~motion/max_linear_acceleration")
+        self._max_angular_acceleration = required_float_param("~motion/max_angular_acceleration")
+        self._twist_alpha = required_float_param("~motion/twist_smoothing_alpha")
 
         self._target_twist = Twist()
         self._current_twist = Twist()

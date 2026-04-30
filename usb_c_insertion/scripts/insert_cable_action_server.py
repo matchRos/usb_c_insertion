@@ -14,6 +14,7 @@ if SCRIPT_DIR not in sys.path:
 
 from ft_interface import FTInterface
 from insertion_controller import InsertionController
+from param_utils import required_bool_param, required_float_param, required_int_param, required_str_param
 from prepose_planner import rotate_vector_by_quaternion
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
@@ -33,22 +34,17 @@ class InsertCableActionServer:
     """
 
     def __init__(self):
-        self._action_name = str(
-            rospy.get_param(
-                "~insert/action_name",
-                rospy.get_param("~action_name", "insert_cable"),
-            )
-        ).strip()
-        self._base_frame = str(rospy.get_param("~frames/base_frame", "base_link")).strip()
-        self._default_timeout = float(rospy.get_param("~insert/force_control_timeout", 8.0))
-        self._default_zero_ft = bool(rospy.get_param("~insert/zero_ft_before_insert", False))
+        self._action_name = required_str_param("~insert/action_name")
+        self._base_frame = required_str_param("~frames/base_frame")
+        self._default_timeout = required_float_param("~insert/force_control_timeout")
+        self._default_zero_ft = required_bool_param("~insert/zero_ft_before_insert")
 
         self._robot = RobotInterface()
         self._tf = TFInterface()
         self._ft = FTInterface(
-            wrench_topic=rospy.get_param("~topics/wrench", "/wrench"),
-            filter_window_size=rospy.get_param("~contact/baseline_window", 20),
-            wrench_timeout=rospy.get_param("~contact/wrench_timeout", 0.2),
+            wrench_topic=required_str_param("~topics/wrench"),
+            filter_window_size=required_int_param("~contact/baseline_window"),
+            wrench_timeout=required_float_param("~contact/wrench_timeout"),
         )
         self._controller = InsertionController(self._robot, self._tf, self._ft)
         self._server = actionlib.SimpleActionServer(
