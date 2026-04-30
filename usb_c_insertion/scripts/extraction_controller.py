@@ -54,6 +54,13 @@ class ExtractionController:
         self._pull_force_tolerance = float(rospy.get_param("~extract/pull_force_tolerance", 1.0))
         self._pull_force_gain = float(rospy.get_param("~extract/pull_force_gain", 0.01))
         self._max_pull_speed = float(rospy.get_param("~extract/max_pull_speed", 0.01))
+        self._pulsed_enabled = bool(rospy.get_param("~extract/pulsed_enabled", False))
+        self._pulse_pull_duration = float(rospy.get_param("~extract/pulse_pull_duration", 0.25))
+        self._pulse_rest_duration = float(rospy.get_param("~extract/pulse_rest_duration", 0.15))
+        self._pulse_min_pull_speed = float(rospy.get_param("~extract/pulse_min_pull_speed", 0.002))
+        self._pulse_pull_force_target = float(
+            rospy.get_param("~extract/pulse_pull_force_target", self._target_pull_force)
+        )
         self._tool_z_direction_sign = float(rospy.get_param("~extract/tool_z_direction_sign", 1.0))
         self._wiggle_speed_y = float(rospy.get_param("~extract/wiggle_speed_y", 0.002))
         self._wiggle_speed_z = float(rospy.get_param("~extract/wiggle_speed_z", 0.002))
@@ -76,6 +83,16 @@ class ExtractionController:
         deadline = rospy.Time.now() + rospy.Duration.from_sec(self._timeout)
         rate = rospy.Rate(max(1.0, self._command_rate))
         start_time = rospy.Time.now()
+        rospy.loginfo(
+            "[usb_c_insertion] event=extract_start mode=%s distance=%.4f target_pull_force=%.3f pulse_target_pull_force=%.3f pulse_pull_duration=%.3f pulse_rest_duration=%.3f max_pull_speed=%.4f",
+            "pulsed" if self._pulsed_enabled else "continuous",
+            self._extract_distance,
+            self._target_pull_force,
+            self._pulse_pull_force_target,
+            self._pulse_pull_duration,
+            self._pulse_rest_duration,
+            self._max_pull_speed,
+        )
 
         while not rospy.is_shutdown():
             if rospy.Time.now() > deadline:
@@ -124,29 +141,28 @@ class ExtractionController:
                         return self._build_result(False, "gripper_open_failed", start_pose, False)
                 return self._build_result(True, "completed", start_pose, gripper_opened)
 
-            force_error = self._target_pull_force - pull_force
-            if abs(force_error) <= self._pull_force_tolerance:
-                pull_speed = self._max_pull_speed
-            else:
-                pull_speed = self._pull_force_gain * force_error
-            bounded_pull_speed = max(
-                0.0,
-                min(self._max_pull_speed, pull_speed),
-            )
-
             elapsed = (rospy.Time.now() - start_time).to_sec()
+            pull_phase, pulse_index = self._pulse_state(elapsed)
+            if pull_phase:
+                bounded_pull_speed = self._compute_pull_speed(pull_force)
+            else:
+                bounded_pull_speed = 0.0
+
             phase = 2.0 * math.pi * self._wiggle_frequency * elapsed
-            tool_y_velocity = self._wiggle_speed_y * math.sin(phase)
-            tool_z_velocity = self._wiggle_speed_z * math.cos(phase)
+            tool_y_velocity = self._wiggle_speed_y * math.sin(phase) if pull_phase else 0.0
 
             vx = extraction_direction[0] * bounded_pull_speed + tool_y_direction[0] * tool_y_velocity
             vy = extraction_direction[1] * bounded_pull_speed + tool_y_direction[1] * tool_y_velocity
             vz = extraction_direction[2] * bounded_pull_speed + tool_y_direction[2] * tool_y_velocity
             rospy.loginfo_throttle(
                 0.5,
-                "[usb_c_insertion] event=extract_progress extracted_distance=%.4f pull_force=%.3f lateral_force=%.3f torque_norm=%.3f pull_speed=%.4f",
+                "[usb_c_insertion] event=extract_progress mode=%s pulse=%d phase=%s extracted_distance=%.4f pull_force=%.3f target_pull_force=%.3f lateral_force=%.3f torque_norm=%.3f pull_speed=%.4f",
+                "pulsed" if self._pulsed_enabled else "continuous",
+                int(pulse_index),
+                "pull" if pull_phase else "rest",
                 extracted_distance,
                 pull_force,
+                self._active_pull_force_target(),
                 lateral_force,
                 torque_norm,
                 bounded_pull_speed,
@@ -182,6 +198,35 @@ class ExtractionController:
             + wrench.torque_z * wrench.torque_z
         )
         return ExtractionResult(success, reason, extracted_distance, pull_force, lateral_force, torque_norm, gripper_opened)
+
+    def _pulse_state(self, elapsed: float) -> Tuple[bool, int]:
+        if not self._pulsed_enabled:
+            return True, 0
+        pull_duration = max(0.01, self._pulse_pull_duration)
+        rest_duration = max(0.0, self._pulse_rest_duration)
+        cycle_duration = pull_duration + rest_duration
+        if cycle_duration <= 0.01:
+            return True, 1
+        cycle_position = elapsed % cycle_duration
+        pulse_index = int(elapsed / cycle_duration) + 1
+        return cycle_position < pull_duration, pulse_index
+
+    def _compute_pull_speed(self, pull_force: float) -> float:
+        target_force = self._active_pull_force_target()
+        force_error = target_force - pull_force
+        if force_error <= -self._pull_force_tolerance:
+            return 0.0
+        if self._pulsed_enabled:
+            proportional_speed = max(0.0, self._pull_force_gain * max(0.0, force_error))
+            requested_speed = max(self._pulse_min_pull_speed, proportional_speed)
+        elif abs(force_error) <= self._pull_force_tolerance:
+            requested_speed = self._max_pull_speed
+        else:
+            requested_speed = self._pull_force_gain * force_error
+        return max(0.0, min(self._max_pull_speed, requested_speed))
+
+    def _active_pull_force_target(self) -> float:
+        return self._pulse_pull_force_target if self._pulsed_enabled else self._target_pull_force
 
     @staticmethod
     def _project_displacement(x0, y0, z0, x1, y1, z1, direction_xyz):

@@ -25,6 +25,7 @@ def main() -> None:
         wrench_topic=rospy.get_param("~topics/wrench", "/wrench"),
         filter_window_size=rospy.get_param("~contact/baseline_window", 20),
         wrench_timeout=rospy.get_param("~contact/wrench_timeout", 0.2),
+        zero_service_name=rospy.get_param("~topics/zero_ft_service", "/ur_hardware_interface/zero_ftsensor"),
     )
     controller = ExtractionController(robot, tf_interface, ft_interface)
 

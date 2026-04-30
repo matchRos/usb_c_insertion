@@ -263,12 +263,27 @@ insertion_workflow:
   search_direct_stop_repeat_count: 20
   search_direct_stop_interval: 0.001
 
+combined_workflow:
+  status_topic: "/usb_c_insertion/combined_workflow/status"
+  startup_delay: 1.0
+  wait_after_insertion: 3.0
+  return_to_start: true
+  return_to_start_timeout: 20.0
+  zero_ft_before_extract: true
+  extract_zero_ft_settle_time: 0.5
+  pipeline_wait_timeout: 3.0
+
 extract:
   distance: 0.05
   pull_force_target: 8.0
   pull_force_tolerance: 1.0
   pull_force_gain: 0.003
   max_pull_speed: 0.006
+  pulsed_enabled: true
+  pulse_pull_duration: 0.22
+  pulse_rest_duration: 0.18
+  pulse_min_pull_speed: 0.004
+  pulse_pull_force_target: 12.0
   tool_z_direction_sign: -1.0
   wiggle_speed_y: 0.002
   wiggle_speed_z: 0.0

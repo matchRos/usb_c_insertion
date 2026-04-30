@@ -182,6 +182,7 @@ catkin_install_python(PROGRAMS
   scripts/align_housing_yaw_action_server.py
   scripts/camera_pose_publisher.py
   scripts/center_port_in_image_action_server.py
+  scripts/combined_workflow.py
   scripts/compute_prepose_service.py
   scripts/estimate_housing_plane_action_server.py
   scripts/extract_cable.py
@@ -201,6 +202,7 @@ catkin_install_python(PROGRAMS
   scripts/verify_insertion_action_server.py
   scripts/verify_looming_action_server.py
   scripts/vision_pose_publisher.py
+  scripts/workflow_gui.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
