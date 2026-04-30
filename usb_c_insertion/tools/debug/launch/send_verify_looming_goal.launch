@@ -3,7 +3,7 @@
   <arg name="tool_z_direction_sign" default="1.0" />
 
   <node pkg="usb_c_insertion"
-        type="send_verify_looming_goal.py"
+        type="tools/debug/scripts/send_verify_looming_goal.py"
         name="usb_c_insertion_verify_looming_goal_client"
         output="screen">
     <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />

@@ -7,8 +7,6 @@ import json
 import math
 from typing import Any, Dict
 
-YAW_OFFSET_RAD = -0.5 * math.pi
-
 
 @dataclass(frozen=True)
 class VisionPose:
@@ -142,23 +140,10 @@ def _quaternion_from_port_axis(port_axis_xy: tuple[float, float]):
     return _quaternion_from_rotation_matrix(rotation_matrix)
 
 
-def _quaternion_from_yaw(yaw_rad: float):
-    half_yaw = 0.5 * yaw_rad
-    return (0.0, 0.0, math.sin(half_yaw), math.cos(half_yaw))
-
-
 def _yaw_from_quaternion(qx: float, qy: float, qz: float, qw: float) -> float:
     siny_cosp = 2.0 * (qw * qz + qx * qy)
     cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
     return math.atan2(siny_cosp, cosy_cosp)
-
-
-def _normalize_angle(angle_rad: float) -> float:
-    while angle_rad > math.pi:
-        angle_rad -= 2.0 * math.pi
-    while angle_rad < -math.pi:
-        angle_rad += 2.0 * math.pi
-    return angle_rad
 
 
 def _cross(vector_a: tuple[float, float, float], vector_b: tuple[float, float, float]):
