@@ -211,6 +211,29 @@ verify:
   counterforce_threshold_z: 1.0
   settle_time: 0.1
 
+insertion_workflow:
+  zero_ft_before_contact: true
+  zero_ft_settle_time: 0.2
+  pipeline_wait_timeout: 3.0
+  approach_tool_z_sign: 1.0
+  approach_speed: 0.004
+  approach_timeout: 8.0
+  approach_max_travel: 0.04
+  approach_contact_force: 1.0
+  contact_settle_time: 0.1
+  pull_tool_z_sign: -1.0
+  pull_force_target: 5.0
+  pull_force_tolerance: 0.5
+  pull_force_gain: 0.002
+  pull_speed_limit: 0.004
+  pull_timeout: 2.0
+  pull_hold_time: 0.25
+  pull_max_retraction: 0.0015
+  return_to_contact_after_failed_pull: true
+  return_timeout: 3.0
+  lateral_verify_after_failed_pull: true
+  lateral_verify_timeout: 2.0
+
 extract:
   distance: 0.05
   pull_force_target: 8.0

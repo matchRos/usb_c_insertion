@@ -186,6 +186,7 @@ catkin_install_python(PROGRAMS
   scripts/estimate_housing_plane_action_server.py
   scripts/extract_cable.py
   scripts/insertion_state_machine.py
+  scripts/insertion_workflow.py
   scripts/insert_cable_action_server.py
   scripts/move_to_pose_action_server.py
   scripts/micro_move_action_server.py

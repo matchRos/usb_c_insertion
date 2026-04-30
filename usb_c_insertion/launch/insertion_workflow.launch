@@ -1,0 +1,14 @@
+<launch>
+  <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
+  <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
+  <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+
+  <node pkg="usb_c_insertion"
+        type="insertion_workflow.py"
+        name="usb_c_insertion_insertion_workflow"
+        output="screen">
+    <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
+    <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+  </node>
+</launch>
