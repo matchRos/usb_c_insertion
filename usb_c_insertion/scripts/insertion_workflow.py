@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import math
 import os
 import sys
-from typing import Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 from geometry_msgs.msg import PointStamped, PoseStamped, Twist
 import rospy
@@ -46,6 +46,17 @@ class PullRetentionResult:
 
 
 @dataclass(frozen=True)
+class InitialApproachCheckResult:
+    accepted: bool
+    terminal_failure: bool
+    reason: str
+    method: str
+    pull_result: Optional[PullRetentionResult]
+    counterforce_y: float
+    counterforce_z: float
+
+
+@dataclass(frozen=True)
 class SearchProbeResult:
     success: bool
     reason: str
@@ -78,7 +89,8 @@ class InsertionWorkflow:
     back to the existing lateral/vertical counterforce verification.
     """
 
-    def __init__(self):
+    def __init__(self, status_callback: Optional[Callable[[str, str, Optional[bool], str, Dict], None]] = None):
+        self._status_callback = status_callback
         self._base_frame = required_str_param("~frames/base_frame")
         self._zero_ft_before_contact = required_bool_param("~insertion_workflow/zero_ft_before_contact")
         self._zero_ft_settle_time = required_float_param("~insertion_workflow/zero_ft_settle_time")
@@ -218,88 +230,169 @@ class InsertionWorkflow:
             queue_size=1,
             latch=True,
         )
+        self._force_insertion_attempted = False
         rospy.on_shutdown(self._handle_shutdown)
 
     def run(self) -> bool:
         rospy.loginfo("[usb_c_insertion] event=insertion_workflow_start")
+        self._publish_status("test_insertion_target_pose", "running", message="preparing_insertion")
         if not self._robot.wait_for_motion_pipeline(
             timeout=self._pipeline_wait_timeout,
             require_pose_servo=True,
         ):
             rospy.logerr("[usb_c_insertion] event=insertion_workflow_failed reason=motion_pipeline_unavailable")
+            self._publish_status(
+                "test_insertion_target_pose",
+                "failed",
+                success=False,
+                message="motion_pipeline_unavailable",
+            )
             return False
 
         if not self._wait_for_wrench():
             rospy.logerr("[usb_c_insertion] event=insertion_workflow_failed reason=wrench_unavailable")
+            self._publish_status(
+                "test_insertion_target_pose",
+                "failed",
+                success=False,
+                message="wrench_unavailable",
+            )
             return False
 
         if self._zero_ft_before_contact:
             rospy.loginfo("[usb_c_insertion] event=insertion_workflow_zero_ft")
+            self._publish_status("test_insertion_target_pose", "running", message="zero_ft_before_contact")
             if not self._ft.zero_sensor():
                 rospy.logerr("[usb_c_insertion] event=insertion_workflow_failed reason=zero_ft_failed")
+                self._publish_status(
+                    "test_insertion_target_pose",
+                    "failed",
+                    success=False,
+                    message="zero_ft_failed",
+                )
                 return False
             rospy.sleep(max(0.0, self._zero_ft_settle_time))
 
+        self._publish_status("test_insertion_target_pose", "running", message="approaching_until_contact")
         contact = self._approach_until_contact()
         if not contact.success or contact.contact_pose is None:
             rospy.logerr(
                 "[usb_c_insertion] event=insertion_workflow_failed reason=contact_approach_%s",
                 contact.reason,
             )
+            self._publish_status(
+                "test_insertion_target_pose",
+                "failed",
+                success=False,
+                message="contact_approach_%s" % contact.reason,
+                values=self._contact_values(contact),
+            )
             return False
 
         rospy.sleep(max(0.0, self._contact_settle_time))
-        pull_result = self._verify_pull_retention(contact.contact_pose)
-        if pull_result.success:
-            rospy.loginfo(
-                "[usb_c_insertion] event=insertion_workflow_complete inserted_verified=true method=pull_retention pull_force=%.3f retraction=%.4f",
-                pull_result.pull_force,
-                pull_result.retraction_distance,
-            )
-            return True
-
-        rospy.loginfo(
-            "[usb_c_insertion] event=insertion_workflow_pull_retention_not_verified reason=%s pull_force=%.3f retraction=%.4f",
-            pull_result.reason,
-            pull_result.pull_force,
-            pull_result.retraction_distance,
+        self._publish_status(
+            "test_insertion_target_pose",
+            "success",
+            success=True,
+            message=contact.reason,
+            values=self._contact_values(contact),
         )
-        if self._return_to_contact_after_failed_pull:
-            if not self._move_to_pose(contact.contact_pose, "return_to_contact_after_failed_pull", self._return_timeout):
-                rospy.loginfo(
-                    "[usb_c_insertion] event=insertion_workflow_complete inserted_verified=false method=return_to_contact reason=return_to_contact_failed"
-                )
-                return False
 
-        if self._lateral_verify_after_failed_pull:
-            if not self._zero_ft_for_verification_stage("lateral_after_failed_pull"):
-                return False
-            lateral_result = self._post_insertion_verifier.verify_retention(
-                move_timeout=self._lateral_verify_timeout
+        self._publish_status("initial_approach_check", "running", message="checking_initial_approach")
+        initial_check = self._check_initial_approach(contact.contact_pose)
+        initial_values = self._initial_check_values(initial_check)
+        if initial_check.terminal_failure:
+            self._publish_status(
+                "initial_approach_check",
+                "failed",
+                success=False,
+                message=initial_check.reason,
+                values=initial_values,
             )
-            if lateral_result.success:
+            rospy.loginfo(
+                "[usb_c_insertion] event=insertion_workflow_complete inserted_verified=false method=initial_approach_check reason=%s",
+                initial_check.reason,
+            )
+            return False
+
+        if initial_check.accepted:
+            self._publish_status(
+                "initial_approach_check",
+                "success",
+                success=True,
+                message=initial_check.method,
+                values=initial_values,
+            )
+            self._publish_status(
+                "search_pattern",
+                "skipped",
+                success=True,
+                message="initial_approach_accepted",
+            )
+            insert_result = self._run_force_controlled_insertion_from_contact(
+                contact.contact_pose,
+                "initial_approach",
+            )
+            if insert_result is not None and insert_result.success:
                 rospy.loginfo(
-                    "[usb_c_insertion] event=insertion_workflow_complete inserted_verified=true method=lateral_counterforce counterforce_y=%.3f counterforce_z=%.3f",
-                    lateral_result.counterforce_y,
-                    lateral_result.counterforce_z,
+                    "[usb_c_insertion] event=insertion_workflow_complete inserted_verified=true method=initial_approach_force_insert inserted_depth=%.4f contact_force=%.3f",
+                    insert_result.inserted_depth,
+                    insert_result.contact_force,
                 )
                 return True
 
+            reason = insert_result.reason if insert_result is not None else "insert_geometry_failed"
+            inserted_depth = insert_result.inserted_depth if insert_result is not None else 0.0
+            contact_force = insert_result.contact_force if insert_result is not None else 0.0
             rospy.loginfo(
-                "[usb_c_insertion] event=insertion_workflow_lateral_not_verified reason=%s counterforce_y=%.3f counterforce_z=%.3f",
-                lateral_result.reason,
-                lateral_result.counterforce_y,
-                lateral_result.counterforce_z,
+                "[usb_c_insertion] event=insertion_workflow_complete inserted_verified=false method=initial_approach_force_insert reason=%s inserted_depth=%.4f contact_force=%.3f",
+                reason,
+                inserted_depth,
+                contact_force,
             )
-        else:
-            rospy.loginfo("[usb_c_insertion] event=insertion_workflow_lateral_skipped_after_failed_pull")
+            return False
+
+        self._publish_status(
+            "initial_approach_check",
+            "success",
+            success=True,
+            message="initial_approach_not_accepted",
+            values=initial_values,
+        )
 
         if not self._search_enabled:
             rospy.loginfo("[usb_c_insertion] event=insertion_workflow_complete inserted_verified=false method=pre_search_checks")
+            self._publish_status(
+                "search_pattern",
+                "skipped",
+                success=False,
+                message="search_disabled_after_initial_check",
+            )
+            self._publish_status(
+                "force_controlled_insertion",
+                "skipped",
+                success=False,
+                message="no_valid_insertion_candidate",
+            )
             return False
 
+        self._publish_status("search_pattern", "running", message="running_spiral_search")
         search_result = self._run_spiral_search(contact.contact_pose)
         if search_result.success:
+            self._publish_status(
+                "search_pattern",
+                "success",
+                success=True,
+                message=search_result.method,
+                values=self._search_values(search_result),
+            )
+            if not self._force_insertion_attempted:
+                self._publish_status(
+                    "force_controlled_insertion",
+                    "skipped",
+                    success=True,
+                    message="force_insert_disabled_after_candidate",
+                )
             rospy.loginfo(
                 "[usb_c_insertion] event=insertion_workflow_complete inserted_verified=true method=%s search_steps=%d/%d inserted_depth=%.4f contact_force=%.3f",
                 search_result.method,
@@ -310,6 +403,20 @@ class InsertionWorkflow:
             )
             return True
 
+        self._publish_status(
+            "search_pattern",
+            "failed",
+            success=False,
+            message=search_result.reason,
+            values=self._search_values(search_result),
+        )
+        if not self._force_insertion_attempted:
+            self._publish_status(
+                "force_controlled_insertion",
+                "skipped",
+                success=False,
+                message="no_valid_insertion_candidate",
+            )
         rospy.loginfo(
             "[usb_c_insertion] event=insertion_workflow_complete inserted_verified=false method=spiral_search reason=%s search_steps=%d/%d inserted_depth=%.4f contact_force=%.3f",
             search_result.reason,
@@ -319,6 +426,158 @@ class InsertionWorkflow:
             search_result.contact_force,
         )
         return False
+
+    def _check_initial_approach(self, contact_pose: PoseStamped) -> InitialApproachCheckResult:
+        pull_result = self._verify_pull_retention(contact_pose)
+        if pull_result.success:
+            rospy.loginfo(
+                "[usb_c_insertion] event=insertion_workflow_initial_approach_accepted method=pull_retention pull_force=%.3f retraction=%.4f",
+                pull_result.pull_force,
+                pull_result.retraction_distance,
+            )
+            return InitialApproachCheckResult(
+                True,
+                False,
+                pull_result.reason,
+                "pull_retention",
+                pull_result,
+                0.0,
+                0.0,
+            )
+
+        rospy.loginfo(
+            "[usb_c_insertion] event=insertion_workflow_pull_retention_not_verified reason=%s pull_force=%.3f retraction=%.4f",
+            pull_result.reason,
+            pull_result.pull_force,
+            pull_result.retraction_distance,
+        )
+        if self._return_to_contact_after_failed_pull:
+            if not self._move_to_pose(contact_pose, "return_to_contact_after_failed_pull", self._return_timeout):
+                rospy.loginfo(
+                    "[usb_c_insertion] event=insertion_workflow_complete inserted_verified=false method=return_to_contact reason=return_to_contact_failed"
+                )
+                return InitialApproachCheckResult(
+                    False,
+                    True,
+                    "return_to_contact_failed",
+                    "return_to_contact",
+                    pull_result,
+                    0.0,
+                    0.0,
+                )
+
+        if self._lateral_verify_after_failed_pull:
+            if not self._zero_ft_for_verification_stage("lateral_after_failed_pull"):
+                return InitialApproachCheckResult(
+                    False,
+                    True,
+                    "lateral_zero_ft_failed",
+                    "lateral_counterforce",
+                    pull_result,
+                    0.0,
+                    0.0,
+                )
+            lateral_result = self._post_insertion_verifier.verify_retention(
+                move_timeout=self._lateral_verify_timeout
+            )
+            if lateral_result.success:
+                rospy.loginfo(
+                    "[usb_c_insertion] event=insertion_workflow_initial_approach_accepted method=lateral_counterforce counterforce_y=%.3f counterforce_z=%.3f",
+                    lateral_result.counterforce_y,
+                    lateral_result.counterforce_z,
+                )
+                return InitialApproachCheckResult(
+                    True,
+                    False,
+                    lateral_result.reason,
+                    "lateral_counterforce",
+                    pull_result,
+                    lateral_result.counterforce_y,
+                    lateral_result.counterforce_z,
+                )
+
+            rospy.loginfo(
+                "[usb_c_insertion] event=insertion_workflow_lateral_not_verified reason=%s counterforce_y=%.3f counterforce_z=%.3f",
+                lateral_result.reason,
+                lateral_result.counterforce_y,
+                lateral_result.counterforce_z,
+            )
+            return InitialApproachCheckResult(
+                False,
+                False,
+                lateral_result.reason,
+                "lateral_counterforce",
+                pull_result,
+                lateral_result.counterforce_y,
+                lateral_result.counterforce_z,
+            )
+
+        rospy.loginfo("[usb_c_insertion] event=insertion_workflow_lateral_skipped_after_failed_pull")
+        return InitialApproachCheckResult(
+            False,
+            False,
+            pull_result.reason,
+            "pull_retention",
+            pull_result,
+            0.0,
+            0.0,
+        )
+
+    def _run_force_controlled_insertion_from_contact(self, contact_pose: PoseStamped, source: str):
+        try:
+            reference_surface_xyz = self._pose_xyz(contact_pose)
+            probe_direction = self._tool_z_direction(contact_pose, self._approach_tool_z_sign)
+        except ValueError as exc:
+            rospy.logerr("[usb_c_insertion] event=insertion_workflow_force_insert_failed reason=%s", exc)
+            self._publish_status(
+                "force_controlled_insertion",
+                "failed",
+                success=False,
+                message="insert_geometry_failed",
+                values={"source": source, "reason": str(exc)},
+            )
+            return None
+        return self._run_force_controlled_insertion(reference_surface_xyz, probe_direction, source)
+
+    def _run_force_controlled_insertion(self, reference_surface_xyz, probe_direction_xyz, source: str):
+        self._force_insertion_attempted = True
+        direction = self._normalize_vector(probe_direction_xyz)
+        self._publish_status(
+            "force_controlled_insertion",
+            "running",
+            message="force_insert_%s" % source,
+            values={
+                "source": source,
+                "reference_x": round(reference_surface_xyz[0], 5),
+                "reference_y": round(reference_surface_xyz[1], 5),
+                "reference_z": round(reference_surface_xyz[2], 5),
+                "direction_x": round(direction[0], 5),
+                "direction_y": round(direction[1], 5),
+                "direction_z": round(direction[2], 5),
+            },
+        )
+        insert_result = self._insertion_controller.insert_until_depth(
+            reference_surface_xyz,
+            direction,
+        )
+        values = self._insert_values(insert_result, source)
+        if insert_result.success:
+            self._publish_status(
+                "force_controlled_insertion",
+                "success",
+                success=True,
+                message=insert_result.reason,
+                values=values,
+            )
+        else:
+            self._publish_status(
+                "force_controlled_insertion",
+                "failed",
+                success=False,
+                message=insert_result.reason,
+                values=values,
+            )
+        return insert_result
 
     def _approach_until_contact(self) -> ContactApproachResult:
         start_pose = self._tf.get_tool_pose_in_base()
@@ -970,9 +1229,10 @@ class InsertionWorkflow:
     ) -> Tuple[bool, str]:
         verification_pose = candidate_pose
         if self._search_insert_after_candidate:
-            insert_result = self._insertion_controller.insert_until_depth(
+            insert_result = self._run_force_controlled_insertion(
                 reference_surface_xyz,
                 probe_direction_xyz,
+                "search_candidate",
             )
             rospy.loginfo(
                 "[usb_c_insertion] event=insertion_spiral_candidate_insert_complete success=%s reason=%s inserted_depth=%.4f contact_force=%.3f",
@@ -1034,6 +1294,96 @@ class InsertionWorkflow:
             )
 
         return False, "spiral_search_candidate_not_verified"
+
+    def _publish_status(
+        self,
+        stage_id: str,
+        status: str,
+        success: Optional[bool] = None,
+        message: str = "",
+        values: Optional[Dict] = None,
+    ) -> None:
+        if self._status_callback is None:
+            return
+        try:
+            self._status_callback(stage_id, status, success, message, values or {})
+        except Exception as exc:
+            rospy.logwarn(
+                "[usb_c_insertion] event=insertion_status_publish_failed stage=%s error=%s",
+                stage_id,
+                exc,
+            )
+
+    def _contact_values(self, result: ContactApproachResult) -> Dict:
+        values = {
+            "reason": result.reason,
+            "contact_force": round(result.contact_force, 3),
+            "travel_distance": round(result.travel_distance, 5),
+        }
+        if result.contact_pose is not None:
+            values["contact_pose"] = self._pose_values(result.contact_pose)
+        if result.contact_point is not None:
+            values.update(
+                {
+                    "contact_x": round(result.contact_point.point.x, 5),
+                    "contact_y": round(result.contact_point.point.y, 5),
+                    "contact_z": round(result.contact_point.point.z, 5),
+                }
+            )
+        return values
+
+    def _initial_check_values(self, result: InitialApproachCheckResult) -> Dict:
+        values = {
+            "accepted": bool(result.accepted),
+            "terminal_failure": bool(result.terminal_failure),
+            "reason": result.reason,
+            "method": result.method,
+            "counterforce_y": round(result.counterforce_y, 3),
+            "counterforce_z": round(result.counterforce_z, 3),
+        }
+        if result.pull_result is not None:
+            values.update(
+                {
+                    "pull_reason": result.pull_result.reason,
+                    "pull_force": round(result.pull_result.pull_force, 3),
+                    "pull_retraction": round(result.pull_result.retraction_distance, 5),
+                }
+            )
+        return values
+
+    def _search_values(self, result: SpiralSearchResult) -> Dict:
+        return {
+            "reason": result.reason,
+            "method": result.method,
+            "completed_steps": int(result.completed_steps),
+            "total_steps": int(result.total_steps),
+            "inserted_depth": round(result.inserted_depth, 5),
+            "contact_force": round(result.contact_force, 3),
+        }
+
+    def _insert_values(self, result, source: str) -> Dict:
+        return {
+            "source": source,
+            "reason": result.reason,
+            "inserted_depth": round(result.inserted_depth, 5),
+            "contact_force": round(result.contact_force, 3),
+            "final_tool_pose": self._pose_values(self._tf.get_tool_pose_in_base()),
+        }
+
+    @staticmethod
+    def _pose_values(pose: Optional[PoseStamped]) -> Dict:
+        if pose is None:
+            return {}
+        return {
+            "frame": pose.header.frame_id,
+            "x": round(pose.pose.position.x, 5),
+            "y": round(pose.pose.position.y, 5),
+            "z": round(pose.pose.position.z, 5),
+            "qx": round(pose.pose.orientation.x, 5),
+            "qy": round(pose.pose.orientation.y, 5),
+            "qz": round(pose.pose.orientation.z, 5),
+            "qw": round(pose.pose.orientation.w, 5),
+        }
 
     def _search_probe_speed_for_force(self, contact_force: float, contact_force_target: float) -> float:
         force_error = max(0.0, contact_force_target - contact_force)

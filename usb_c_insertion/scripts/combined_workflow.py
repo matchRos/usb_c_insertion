@@ -39,7 +39,10 @@ class WorkflowStatusPublisher:
         ("final_plane", "Final Plane"),
         ("updated_port_pose", "Updated Port Pose"),
         ("tcp_precontact", "TCP Precontact"),
-        ("insertion", "Insertion"),
+        ("test_insertion_target_pose", "Test Insertion At Target Pose"),
+        ("initial_approach_check", "Initial Approach Check"),
+        ("search_pattern", "Search Pattern"),
+        ("force_controlled_insertion", "Force-Controlled Insertion"),
         ("wait_after_insertion", "Wait"),
         ("extract", "Extract"),
         ("return_to_start", "Return To Start"),
@@ -304,7 +307,7 @@ class CombinedInsertionWorkflow:
     def _run_insertion(self) -> bool:
         settle_time = max(0.0, self._settle_before_insertion)
         self._status.publish(
-            "insertion",
+            "test_insertion_target_pose",
             "running",
             message="settling_before_insertion",
             values={"settle_s": round(settle_time, 2)},
@@ -317,14 +320,25 @@ class CombinedInsertionWorkflow:
             )
             rospy.sleep(settle_time)
 
-        self._status.publish("insertion", "running", message="starting_insertion_workflow")
-        insertion = InsertionWorkflow()
+        self._status.publish("test_insertion_target_pose", "running", message="starting_insertion_workflow")
+        insertion = InsertionWorkflow(status_callback=self._publish_insertion_status)
         success = insertion.run()
-        values = {"final_tool_pose": self._current_tool_pose_values()}
         if not success:
-            return self._fail("insertion", "insertion_failed_or_unverified", values)
-        self._status.publish("insertion", "success", success=True, values=values)
+            rospy.logerr(
+                "[usb_c_insertion] event=combined_workflow_failed stage=insertion reason=insertion_failed_or_unverified"
+            )
+            return False
         return True
+
+    def _publish_insertion_status(
+        self,
+        stage_id: str,
+        status: str,
+        success: Optional[bool] = None,
+        message: str = "",
+        values: Optional[Dict] = None,
+    ) -> None:
+        self._status.publish(stage_id, status, success=success, message=message, values=values or {})
 
     def _run_wait_after_insertion(self) -> bool:
         self._status.publish(

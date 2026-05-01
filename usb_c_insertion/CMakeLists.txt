@@ -183,10 +183,8 @@ catkin_install_python(PROGRAMS
   scripts/camera_pose_publisher.py
   scripts/center_port_in_image_action_server.py
   scripts/combined_workflow.py
-  scripts/compute_prepose_service.py
   scripts/estimate_housing_plane_action_server.py
   scripts/extract_cable.py
-  scripts/insertion_state_machine.py
   scripts/insertion_workflow.py
   scripts/insert_cable_action_server.py
   scripts/move_to_pose_action_server.py
@@ -195,9 +193,7 @@ catkin_install_python(PROGRAMS
   scripts/preinsert_alignment_workflow.py
   scripts/preinsert_workflow_helpers.py
   scripts/pose_servo_node.py
-  scripts/probe_surface_action_server.py
   scripts/run_vision_service.py
-  scripts/search_port_action_server.py
   scripts/twist_controller_node.py
   scripts/verify_insertion_action_server.py
   scripts/verify_looming_action_server.py

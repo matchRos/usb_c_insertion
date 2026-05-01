@@ -12,8 +12,6 @@ GLOBAL_CONFIG_NAMESPACES = frozenset(
         "motion",
         "micro_motion",
         "contact",
-        "probe",
-        "search",
         "center_port",
         "looming",
         "housing_plane",
@@ -22,7 +20,7 @@ GLOBAL_CONFIG_NAMESPACES = frozenset(
         "verify",
         "extract",
         "gripper",
-        "state_machine",
+        "precontact",
         "workflow",
         "photo_pose",
         "presentation_snapshots",
@@ -47,8 +45,8 @@ def get_param(name: str, default=None):
     Read package configuration from the global namespace first.
 
     Launch files load config YAMLs globally.  Keeping this helper global-first
-    prevents stale private copies such as `/node/state_machine/foo` from
-    shadowing the single intended `/state_machine/foo` value.
+    prevents stale private copies such as `/node/precontact/foo` from
+    shadowing the single intended `/precontact/foo` value.
     """
     if str(name).startswith("~"):
         global_name = global_name_for_private(name)

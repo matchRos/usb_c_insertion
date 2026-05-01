@@ -65,19 +65,19 @@ class PreinsertWorkflowHelpers:
         self._refine_camera_distance = self._required_float_param("~workflow/refine_camera_distance")
         self._refine_yaw_delta_sign = self._required_float_param("~workflow/refine_yaw_delta_sign")
         self._refine_yaw_max_delta_deg = self._required_float_param("~workflow/refine_yaw_max_delta_deg")
-        self._precontact_offset_tool_x = self._required_float_param("~state_machine/precontact_offset_tool_x")
-        self._precontact_offset_tool_y = self._required_float_param("~state_machine/precontact_offset_tool_y")
-        self._precontact_offset_tool_z = self._required_float_param("~state_machine/precontact_offset_tool_z")
-        self._target_offset_tool_x = self._required_float_param("~state_machine/target_offset_tool_x")
-        self._target_offset_tool_y = self._required_float_param("~state_machine/target_offset_tool_y")
+        self._precontact_offset_tool_x = self._required_float_param("~precontact/precontact_offset_tool_x")
+        self._precontact_offset_tool_y = self._required_float_param("~precontact/precontact_offset_tool_y")
+        self._precontact_offset_tool_z = self._required_float_param("~precontact/precontact_offset_tool_z")
+        self._target_offset_tool_x = self._required_float_param("~precontact/target_offset_tool_x")
+        self._target_offset_tool_y = self._required_float_param("~precontact/target_offset_tool_y")
         self._looming_tool_z_direction_sign = self._sign(
             self._required_float_param("~looming/tool_z_direction_sign")
         )
         self._enforce_precontact_standoff = self._required_bool_param(
-            "~state_machine/enforce_precontact_standoff"
+            "~precontact/enforce_precontact_standoff"
         )
         self._min_precontact_standoff = abs(
-            self._required_float_param("~state_machine/min_precontact_standoff")
+            self._required_float_param("~precontact/min_precontact_standoff")
         )
 
         self._tf = TFInterface()

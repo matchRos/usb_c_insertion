@@ -1,0 +1,82 @@
+# Legacy parameters for scripts moved to usb_c_insertion/scripts/old.
+# This file is intentionally not loaded by the current launch files.
+
+motion:
+  probe_speed: 0.005
+  retract_speed: 0.02
+  search_speed: 0.003
+  search_traverse_speed: 0.012
+  move_speed: 0.05
+
+contact:
+  force_threshold_x: 2.0
+  force_threshold_y: 2.0
+  force_threshold_z: 2.0
+  force_threshold_norm: 5.0
+  torque_threshold: 0.2
+
+probe:
+  retract_distance: 0.005
+  surface_retract_distance: 0.0015
+  inter_probe_backoff_distance: 0.01
+  second_probe_y_offset: 0.02
+  max_probe_distance: 0.2
+  probe_timeout: 20.0
+
+search:
+  pattern: "spiral"
+  step_x: 0.0019
+  step_y: 0.0013
+  max_search_width: 0.015
+  max_search_height: 0.015
+  search_timeout: 90.0
+  preferred_tool_x_sign: -1.0
+  preferred_z_sign: 1.0
+  diagonal_first: true
+  transfer_timeout: 1.2
+  transfer_max_velocity: 0.0
+  transfer_max_acceleration: 0.0
+  transfer_max_jerk: 0.0
+  transfer_arc_enabled: true
+  transfer_arc_height: 0.004
+  pre_probe_clearance: 0.001
+  pre_probe_settle_time: 0.1
+  zero_ft_before_search: true
+  initial_probe_speed: 0.010
+  initial_probe_max_travel: 0.06
+  initial_probe_timeout: 8.0
+  probe_speed: 0.006
+  probe_timeout: 1.8
+  probe_max_travel: 0.004
+  contact_force_target: 1.0
+  socket_depth_threshold: 0.0030
+  verify_initial_contact: true
+  verification_required: false
+  verify_timeout: 2.0
+  direct_stop_repeat_count: 10
+  direct_stop_interval: 0.001
+
+state_machine:
+  auto_zero_ft: true
+  target_offset_tool_x: +0.0
+  target_offset_tool_y: +0.002
+  prepose_offset: -0.01
+  precontact_offset_tool_x: -0.000
+  precontact_offset_tool_y: 0.000
+  precontact_offset_tool_z: -0.016
+  probe_offset_tool_x: 0.0
+  probe_offset_tool_y: 0.0
+  enforce_precontact_standoff: true
+  min_precontact_standoff: 0.008
+  prepose_speed: 0.035
+  prepose_timeout: 30.0
+  position_tolerance: 0.002
+
+verify:
+  move_speed: 0.002
+
+workflow:
+  photo_pose_max_linear_speed: 0.12
+  photo_pose_max_angular_speed: 0.35
+  prepose_max_linear_speed: 0.10
+  prepose_max_angular_speed: 0.30

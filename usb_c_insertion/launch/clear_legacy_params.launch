@@ -1,0 +1,24 @@
+<launch>
+  <rosparam command="delete" param="/probe" />
+  <rosparam command="delete" param="/search" />
+  <rosparam command="delete" param="/state_machine" />
+
+  <rosparam command="delete" param="/motion/probe_speed" />
+  <rosparam command="delete" param="/motion/retract_speed" />
+  <rosparam command="delete" param="/motion/search_speed" />
+  <rosparam command="delete" param="/motion/search_traverse_speed" />
+  <rosparam command="delete" param="/motion/move_speed" />
+
+  <rosparam command="delete" param="/contact/force_threshold_x" />
+  <rosparam command="delete" param="/contact/force_threshold_y" />
+  <rosparam command="delete" param="/contact/force_threshold_z" />
+  <rosparam command="delete" param="/contact/force_threshold_norm" />
+  <rosparam command="delete" param="/contact/torque_threshold" />
+
+  <rosparam command="delete" param="/verify/move_speed" />
+
+  <rosparam command="delete" param="/workflow/photo_pose_max_linear_speed" />
+  <rosparam command="delete" param="/workflow/photo_pose_max_angular_speed" />
+  <rosparam command="delete" param="/workflow/prepose_max_linear_speed" />
+  <rosparam command="delete" param="/workflow/prepose_max_angular_speed" />
+</launch>
