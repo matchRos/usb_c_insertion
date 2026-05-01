@@ -169,7 +169,7 @@ insertion_workflow:
   approach_speed: 0.004
   approach_timeout: 8.0
   approach_max_travel: 0.04
-  approach_contact_force: 2.0
+  approach_contact_force: 5.0
   contact_settle_time: 0.1
   pull_tool_z_sign: -1.0
   pull_force_mode: "tool_z"
@@ -188,21 +188,21 @@ insertion_workflow:
   lateral_verify_timeout: 2.0
   verification_zero_ft_settle_time: 0.25
   search_enabled: true
-  search_timeout: 60.0
-  search_step_tool_x: 0.0011
-  search_step_base_z: 0.0011
-  search_width_tool_x: 0.006
-  search_height_base_z: 0.005
+  search_timeout: 90.0
+  search_step_tool_x: 0.0005
+  search_step_base_z: 0.0005
+  search_width_tool_x: 0.008
+  search_height_base_z: 0.006
   search_preferred_tool_x_sign: -1.0
-  search_preferred_base_z_sign: 1.0
-  search_pre_probe_clearance: 0.0012
-  search_pre_probe_settle_time: 0.03
-  search_transfer_timeout: 2.0
+  search_preferred_base_z_sign: -1.0
+  search_pre_probe_clearance: 0.0015
+  search_pre_probe_settle_time: 0.05
+  search_transfer_timeout: 3.0
   search_probe_speed_limit: 0.0022
   search_probe_min_speed: 0.00045
   search_probe_force_gain: 0.004
-  search_probe_timeout: 2.5
-  search_probe_max_travel: 0.0035
+  search_probe_timeout: 4.0
+  search_probe_max_travel: 0.004
   search_contact_force_target: 1.5
   search_center_first_probe: true
   search_center_first_contact_force_target: 5.0
@@ -284,8 +284,8 @@ presentation_snapshots:
   morph_kernel_size: 5
 
 precontact:
-  target_offset_tool_x: +0.0
-  target_offset_tool_y: +0.002
+  target_offset_tool_x: -0.0007
+  target_offset_tool_y: +0.0018
   precontact_offset_tool_x: -0.000
   precontact_offset_tool_y: 0.000
   precontact_offset_tool_z: -0.016
