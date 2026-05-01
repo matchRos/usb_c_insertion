@@ -1,24 +1,25 @@
 <launch>
-  <rosparam command="delete" param="/probe" />
-  <rosparam command="delete" param="/search" />
-  <rosparam command="delete" param="/state_machine" />
+  <!-- Clear these namespaces before loading insertion_params.yaml so removed
+       legacy keys cannot linger on the global Param Server. -->
+  <group ns="/motion" clear_params="true" />
+  <group ns="/micro_motion" clear_params="true" />
+  <group ns="/contact" clear_params="true" />
+  <group ns="/center_port" clear_params="true" />
+  <group ns="/looming" clear_params="true" />
+  <group ns="/housing_plane" clear_params="true" />
+  <group ns="/align_housing_yaw" clear_params="true" />
+  <group ns="/insert" clear_params="true" />
+  <group ns="/verify" clear_params="true" />
+  <group ns="/insertion_workflow" clear_params="true" />
+  <group ns="/combined_workflow" clear_params="true" />
+  <group ns="/extract" clear_params="true" />
+  <group ns="/gripper" clear_params="true" />
+  <group ns="/photo_pose" clear_params="true" />
+  <group ns="/presentation_snapshots" clear_params="true" />
+  <group ns="/precontact" clear_params="true" />
+  <group ns="/workflow" clear_params="true" />
 
-  <rosparam command="delete" param="/motion/probe_speed" />
-  <rosparam command="delete" param="/motion/retract_speed" />
-  <rosparam command="delete" param="/motion/search_speed" />
-  <rosparam command="delete" param="/motion/search_traverse_speed" />
-  <rosparam command="delete" param="/motion/move_speed" />
-
-  <rosparam command="delete" param="/contact/force_threshold_x" />
-  <rosparam command="delete" param="/contact/force_threshold_y" />
-  <rosparam command="delete" param="/contact/force_threshold_z" />
-  <rosparam command="delete" param="/contact/force_threshold_norm" />
-  <rosparam command="delete" param="/contact/torque_threshold" />
-
-  <rosparam command="delete" param="/verify/move_speed" />
-
-  <rosparam command="delete" param="/workflow/photo_pose_max_linear_speed" />
-  <rosparam command="delete" param="/workflow/photo_pose_max_angular_speed" />
-  <rosparam command="delete" param="/workflow/prepose_max_linear_speed" />
-  <rosparam command="delete" param="/workflow/prepose_max_angular_speed" />
+  <group ns="/probe" clear_params="true" />
+  <group ns="/search" clear_params="true" />
+  <group ns="/state_machine" clear_params="true" />
 </launch>

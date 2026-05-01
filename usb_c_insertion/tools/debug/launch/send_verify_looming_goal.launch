@@ -2,6 +2,8 @@
   <arg name="image_topic" default="/zedm/zed_node/left/image_rect_color" />
   <arg name="tool_z_direction_sign" default="1.0" />
 
+  <include file="$(find usb_c_insertion)/launch/clear_legacy_params.launch" />
+
   <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
 
   <node pkg="usb_c_insertion"

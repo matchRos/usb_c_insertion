@@ -3,6 +3,8 @@
   <arg name="publish_vision_pose_only" default="false" />
   <arg name="run_vision_script_path" default="$(find usb_c_insertion)/scripts/run_vision.sh" />
 
+  <include file="$(find usb_c_insertion)/launch/clear_legacy_params.launch" />
+
   <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
   <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
   <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />

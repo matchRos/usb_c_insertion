@@ -2,6 +2,7 @@
 <launch>
     <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml"/>
     <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml"/>
+    <include file="$(find usb_c_insertion)/launch/clear_legacy_params.launch"/>
     <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml"/>
 
     <include file="$(find ur_robot_driver)/launch/ur5e_bringup.launch">

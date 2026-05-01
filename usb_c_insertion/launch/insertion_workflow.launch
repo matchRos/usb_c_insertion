@@ -1,4 +1,6 @@
 <launch>
+  <include file="$(find usb_c_insertion)/launch/clear_legacy_params.launch" />
+
   <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
   <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
   <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />

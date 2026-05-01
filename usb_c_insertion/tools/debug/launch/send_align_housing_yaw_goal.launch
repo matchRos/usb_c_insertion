@@ -2,6 +2,8 @@
   <arg name="image_topic" default="/zedm/zed_node/left/image_rect_color" />
   <arg name="cloud_topic" default="/zedm/zed_node/point_cloud/cloud_registered" />
 
+  <include file="$(find usb_c_insertion)/launch/clear_legacy_params.launch" />
+
   <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
 
   <node pkg="usb_c_insertion"
