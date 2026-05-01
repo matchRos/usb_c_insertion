@@ -85,6 +85,8 @@ looming:
   hsv_lower: [35, 70, 40]
   hsv_upper: [90, 255, 255]
   morph_kernel_size: 5
+  foe_debug_enabled: true
+  foe_debug_output_dir: "/tmp/usb_c_insertion_looming_foe"
 
 housing_plane:
   action_name: "estimate_housing_plane"

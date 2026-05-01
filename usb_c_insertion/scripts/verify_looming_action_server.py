@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import os
 import sys
+import time
 from dataclasses import dataclass
 from threading import RLock
 from typing import Optional, Tuple
@@ -20,7 +21,13 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
-from param_utils import required_float_param, required_int_param, required_str_param, required_vector_param
+from param_utils import (
+    required_bool_param,
+    required_float_param,
+    required_int_param,
+    required_str_param,
+    required_vector_param,
+)
 from prepose_planner import rotate_vector_by_quaternion
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
@@ -42,6 +49,9 @@ class GreenBlobDetection:
     area: float = 0.0
     aspect_ratio: float = 0.0
     message: str = ""
+    bgr: Optional[np.ndarray] = None
+    gray: Optional[np.ndarray] = None
+    mask: Optional[np.ndarray] = None
 
 
 class VerifyLoomingActionServer:
@@ -74,6 +84,8 @@ class VerifyLoomingActionServer:
         self._hsv_lower = self._read_hsv_param("~looming/hsv_lower")
         self._hsv_upper = self._read_hsv_param("~looming/hsv_upper")
         self._morph_kernel_size = max(0, required_int_param("~looming/morph_kernel_size"))
+        self._foe_debug_enabled = required_bool_param("~looming/foe_debug_enabled")
+        self._foe_debug_output_dir = required_str_param("~looming/foe_debug_output_dir")
         self._motion_pipeline_wait_timeout = required_float_param("~motion/action_pipeline_wait_timeout")
 
         self._robot = RobotInterface()
@@ -302,6 +314,7 @@ class VerifyLoomingActionServer:
 
     def _detect_green_blob(self, msg: Image) -> GreenBlobDetection:
         bgr = self._rotate_image_for_processing(self._image_to_bgr(msg))
+        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(
             hsv,
@@ -315,7 +328,14 @@ class VerifyLoomingActionServer:
 
         label_count, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, 8)
         if label_count <= 1:
-            return self._make_detection(msg, False, message="no_green_blob")
+            return self._make_detection(
+                msg,
+                False,
+                message="no_green_blob",
+                bgr=bgr,
+                gray=gray,
+                mask=np.zeros_like(mask),
+            )
 
         areas = stats[1:, cv2.CC_STAT_AREA]
         largest_index = int(np.argmax(areas)) + 1
@@ -324,6 +344,8 @@ class VerifyLoomingActionServer:
         width = float(stats[largest_index, cv2.CC_STAT_WIDTH])
         height = float(stats[largest_index, cv2.CC_STAT_HEIGHT])
         aspect_ratio = width / height if height > 1e-6 else 0.0
+        component_mask = np.zeros_like(mask)
+        component_mask[labels == largest_index] = 255
         return self._make_detection(
             msg,
             True,
@@ -331,6 +353,9 @@ class VerifyLoomingActionServer:
             float(center_y),
             area,
             aspect_ratio,
+            bgr=bgr,
+            gray=gray,
+            mask=component_mask,
         )
 
     def _make_detection(
@@ -342,18 +367,29 @@ class VerifyLoomingActionServer:
         area: float = 0.0,
         aspect_ratio: float = 0.0,
         message: str = "",
+        bgr: Optional[np.ndarray] = None,
+        gray: Optional[np.ndarray] = None,
+        mask: Optional[np.ndarray] = None,
     ) -> GreenBlobDetection:
         stamp = msg.header.stamp if msg.header.stamp != rospy.Time() else rospy.Time.now()
+        if bgr is not None:
+            image_height, image_width = bgr.shape[:2]
+        else:
+            image_width = int(msg.width)
+            image_height = int(msg.height)
         return GreenBlobDetection(
             stamp=stamp,
-            image_width=int(msg.width),
-            image_height=int(msg.height),
+            image_width=int(image_width),
+            image_height=int(image_height),
             found=found,
             center_x=float(center_x),
             center_y=float(center_y),
             area=float(area),
             aspect_ratio=float(aspect_ratio),
             message=message,
+            bgr=bgr,
+            gray=gray,
+            mask=mask,
         )
 
     def _image_to_bgr(self, msg: Image) -> np.ndarray:
@@ -410,7 +446,14 @@ class VerifyLoomingActionServer:
                 image_width=detection.image_width,
                 image_height=detection.image_height,
                 found=False,
+                center_x=detection.center_x,
+                center_y=detection.center_y,
+                area=detection.area,
+                aspect_ratio=detection.aspect_ratio,
                 message="green_blob_too_small",
+                bgr=detection.bgr,
+                gray=detection.gray,
+                mask=detection.mask,
             )
         return detection
 
@@ -439,6 +482,254 @@ class VerifyLoomingActionServer:
             feedback.aspect_ratio_change = self._aspect_ratio_change(initial_detection, current_detection)
         feedback.command_tool_z = float(command_tool_z)
         self._server.publish_feedback(feedback)
+
+    def _log_foe_debug_analysis(
+        self,
+        success: bool,
+        message: str,
+        initial_detection: Optional[GreenBlobDetection],
+        current_detection: Optional[GreenBlobDetection],
+    ) -> None:
+        if not self._foe_debug_enabled:
+            return
+        if initial_detection is None or current_detection is None:
+            rospy.loginfo("[usb_c_insertion] event=verify_looming_foe_skipped reason=missing_detection")
+            return
+        if initial_detection.gray is None or current_detection.gray is None:
+            rospy.loginfo("[usb_c_insertion] event=verify_looming_foe_skipped reason=missing_image")
+            return
+        if current_detection.bgr is None or current_detection.mask is None:
+            rospy.loginfo("[usb_c_insertion] event=verify_looming_foe_skipped reason=missing_current_mask")
+            return
+        if initial_detection.gray.shape != current_detection.gray.shape:
+            rospy.logwarn(
+                "[usb_c_insertion] event=verify_looming_foe_skipped reason=image_size_changed initial_shape=%s current_shape=%s",
+                str(initial_detection.gray.shape),
+                str(current_detection.gray.shape),
+            )
+            return
+
+        mask = current_detection.mask > 0
+        mask_pixel_count = int(np.count_nonzero(mask))
+        if mask_pixel_count < 8:
+            rospy.loginfo(
+                "[usb_c_insertion] event=verify_looming_foe_skipped reason=mask_too_small mask_pixels=%d",
+                mask_pixel_count,
+            )
+            return
+
+        flow = cv2.calcOpticalFlowFarneback(
+            initial_detection.gray,
+            current_detection.gray,
+            None,
+            0.5,
+            3,
+            25,
+            3,
+            5,
+            1.2,
+            0,
+        )
+        y_coords, x_coords = np.nonzero(mask)
+        vectors = flow[y_coords, x_coords, :]
+        magnitudes = np.linalg.norm(vectors, axis=1)
+        finite = np.isfinite(magnitudes)
+        significant = finite & (magnitudes >= 0.05)
+        point_count = int(np.count_nonzero(significant))
+        if point_count < 2:
+            debug_path = self._write_foe_debug_image(
+                current_detection,
+                mask,
+                flow,
+                None,
+                message,
+                initial_detection,
+            )
+            rospy.loginfo(
+                "[usb_c_insertion] event=verify_looming_foe_analysis success=%s reason=%s mask_pixels=%d flow_points=%d mean_flow_x=0.000 mean_flow_y=0.000 mean_flow_mag=0.000 median_flow_mag=0.000 max_flow_mag=0.000 foe_x=nan foe_y=nan foe_rms_px=nan foe_to_marker_center_px=nan foe_to_image_center_px=nan radial_mean_cos=nan outward_ratio=nan debug_image=%s",
+                str(success).lower(),
+                message,
+                mask_pixel_count,
+                point_count,
+                debug_path,
+            )
+            return
+
+        points = np.column_stack((x_coords[significant], y_coords[significant])).astype(np.float32)
+        vectors = vectors[significant].astype(np.float32)
+        magnitudes = magnitudes[significant].astype(np.float32)
+        mean_flow = np.mean(vectors, axis=0)
+        mean_magnitude = float(np.mean(magnitudes))
+        median_magnitude = float(np.median(magnitudes))
+        max_magnitude = float(np.max(magnitudes))
+        foe, foe_rms = self._estimate_focus_of_expansion(points, vectors)
+        radial_mean_cos = float("nan")
+        outward_ratio = float("nan")
+        if foe is not None:
+            radial = points - foe.reshape((1, 2))
+            radial_norm = np.linalg.norm(radial, axis=1)
+            vector_norm = np.linalg.norm(vectors, axis=1)
+            valid_radial = (radial_norm > 1e-6) & (vector_norm > 1e-6)
+            if np.any(valid_radial):
+                cosine = np.sum(radial[valid_radial] * vectors[valid_radial], axis=1)
+                cosine = cosine / (radial_norm[valid_radial] * vector_norm[valid_radial])
+                radial_mean_cos = float(np.mean(cosine))
+                outward_ratio = float(np.count_nonzero(cosine > 0.0)) / float(cosine.size)
+
+        debug_path = self._write_foe_debug_image(
+            current_detection,
+            mask,
+            flow,
+            foe,
+            message,
+            initial_detection,
+        )
+        foe_x = float(foe[0]) if foe is not None else float("nan")
+        foe_y = float(foe[1]) if foe is not None else float("nan")
+        foe_to_marker_center = float("nan")
+        foe_to_image_center = float("nan")
+        if foe is not None:
+            marker_dx = foe_x - float(current_detection.center_x)
+            marker_dy = foe_y - float(current_detection.center_y)
+            image_dx = foe_x - (float(current_detection.image_width) * 0.5)
+            image_dy = foe_y - (float(current_detection.image_height) * 0.5)
+            foe_to_marker_center = math.sqrt(marker_dx * marker_dx + marker_dy * marker_dy)
+            foe_to_image_center = math.sqrt(image_dx * image_dx + image_dy * image_dy)
+        rospy.loginfo(
+            "[usb_c_insertion] event=verify_looming_foe_analysis success=%s reason=%s mask_pixels=%d flow_points=%d mean_flow_x=%.3f mean_flow_y=%.3f mean_flow_mag=%.3f median_flow_mag=%.3f max_flow_mag=%.3f foe_x=%.2f foe_y=%.2f foe_rms_px=%.3f foe_to_marker_center_px=%.2f foe_to_image_center_px=%.2f radial_mean_cos=%.3f outward_ratio=%.3f debug_image=%s",
+            str(success).lower(),
+            message,
+            mask_pixel_count,
+            point_count,
+            float(mean_flow[0]),
+            float(mean_flow[1]),
+            mean_magnitude,
+            median_magnitude,
+            max_magnitude,
+            foe_x,
+            foe_y,
+            foe_rms,
+            foe_to_marker_center,
+            foe_to_image_center,
+            radial_mean_cos,
+            outward_ratio,
+            debug_path,
+        )
+
+    @staticmethod
+    def _estimate_focus_of_expansion(points: np.ndarray, vectors: np.ndarray):
+        if points.shape[0] < 2:
+            return None, float("nan")
+        normals = np.column_stack((-vectors[:, 1], vectors[:, 0])).astype(np.float64)
+        normal_norm = np.linalg.norm(normals, axis=1)
+        valid = normal_norm > 1e-6
+        if np.count_nonzero(valid) < 2:
+            return None, float("nan")
+        normals = normals[valid] / normal_norm[valid].reshape((-1, 1))
+        points = points[valid].astype(np.float64)
+        rhs = np.sum(normals * points, axis=1)
+        try:
+            foe, _, rank, _ = np.linalg.lstsq(normals, rhs, rcond=None)
+        except np.linalg.LinAlgError:
+            return None, float("nan")
+        if rank < 2:
+            return None, float("nan")
+        residual = normals.dot(foe) - rhs
+        return foe.astype(np.float32), float(math.sqrt(np.mean(residual * residual)))
+
+    def _write_foe_debug_image(
+        self,
+        current_detection: GreenBlobDetection,
+        mask: np.ndarray,
+        flow: np.ndarray,
+        foe,
+        message: str,
+        initial_detection: GreenBlobDetection,
+    ) -> str:
+        if current_detection.bgr is None:
+            return ""
+        debug = current_detection.bgr.copy()
+        mask_bool = mask.astype(bool)
+        if np.any(mask_bool):
+            tint = debug.copy()
+            tint[mask_bool] = (0, 160, 0)
+            debug = cv2.addWeighted(debug, 0.72, tint, 0.28, 0.0)
+            contours, _ = cv2.findContours(mask.astype(np.uint8) * 255, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            cv2.drawContours(debug, contours, -1, (0, 255, 0), 2)
+
+        height, width = mask.shape[:2]
+        vector_stride = 16
+        vector_scale = 4.0
+        max_vectors = 260
+        drawn = 0
+        for y in range(vector_stride // 2, height, vector_stride):
+            for x in range(vector_stride // 2, width, vector_stride):
+                if not mask_bool[y, x]:
+                    continue
+                dx = float(flow[y, x, 0])
+                dy = float(flow[y, x, 1])
+                if not math.isfinite(dx) or not math.isfinite(dy):
+                    continue
+                if math.sqrt(dx * dx + dy * dy) < 0.05:
+                    continue
+                start = (int(x), int(y))
+                end = (int(round(x + dx * vector_scale)), int(round(y + dy * vector_scale)))
+                cv2.arrowedLine(debug, start, end, (0, 255, 255), 1, tipLength=0.35)
+                drawn += 1
+                if drawn >= max_vectors:
+                    break
+            if drawn >= max_vectors:
+                break
+
+        self._draw_cross(debug, initial_detection.center_x, initial_detection.center_y, (255, 180, 0), 8, 1)
+        self._draw_cross(debug, current_detection.center_x, current_detection.center_y, (255, 0, 255), 8, 1)
+        self._draw_cross(debug, width * 0.5, height * 0.5, (255, 255, 0), 8, 1)
+        if foe is not None:
+            self._draw_cross(debug, float(foe[0]), float(foe[1]), (0, 0, 255), 12, 2)
+            cv2.putText(
+                debug,
+                "FOE",
+                (int(round(float(foe[0]) + 8)), int(round(float(foe[1]) - 8))),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (0, 0, 255),
+                1,
+                cv2.LINE_AA,
+            )
+        cv2.putText(
+            debug,
+            "yellow: optical flow  orange: initial center  magenta: current center  cyan: image center",
+            (10, max(20, height - 14)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+
+        os.makedirs(self._foe_debug_output_dir, exist_ok=True)
+        now = rospy.Time.now()
+        filename = "foe_%s_%s.png" % (
+            "%s_%09d" % (time.strftime("%Y%m%d_%H%M%S"), now.nsecs),
+            self._safe_filename_fragment(message),
+        )
+        path = os.path.join(self._foe_debug_output_dir, filename)
+        if not cv2.imwrite(path, debug):
+            rospy.logwarn("[usb_c_insertion] event=verify_looming_foe_debug_write_failed path=%s", path)
+            return ""
+        return path
+
+    @staticmethod
+    def _draw_cross(image: np.ndarray, x: float, y: float, color, radius: int, thickness: int) -> None:
+        cx = int(round(float(x)))
+        cy = int(round(float(y)))
+        cv2.line(image, (cx - radius, cy), (cx + radius, cy), color, thickness)
+        cv2.line(image, (cx, cy - radius), (cx, cy + radius), color, thickness)
+
+    @staticmethod
+    def _safe_filename_fragment(text: str) -> str:
+        cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(text).strip())
+        return cleaned[:48] or "looming"
 
     def _make_result(
         self,
@@ -475,6 +766,10 @@ class VerifyLoomingActionServer:
             result.aspect_ratio_change = self._aspect_ratio_change(initial_detection, current_detection)
         if started_at is not None:
             result.elapsed = float((rospy.Time.now() - started_at).to_sec())
+        try:
+            self._log_foe_debug_analysis(success, message, initial_detection, current_detection)
+        except Exception as exc:
+            rospy.logwarn("[usb_c_insertion] event=verify_looming_foe_analysis_failed error=%s", exc)
         return result
 
     def _abort(
