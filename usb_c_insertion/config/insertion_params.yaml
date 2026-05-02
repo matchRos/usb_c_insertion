@@ -329,25 +329,27 @@ usb_card_detector:
   card_min_channel_value: 80
   card_max_channel_delta: 95
   mask_overlay_alpha: 0.12
-  morph_kernel_size: 7
+  morph_kernel_size: 5
   morph_open_iterations: 1
-  morph_close_iterations: 2
+  morph_close_iterations: 0
   min_card_area: 2500.0
   max_card_area: 250000.0
-  min_card_aspect_ratio: 1.15
+  min_card_aspect_ratio: 2.0
   max_card_aspect_ratio: 8.0
   min_card_rectangularity: 0.55
   min_card_extent: 0.40
+  require_vertical_cards: true
+  max_vertical_error_deg: 20.0
   max_detections: 4
   split_enabled: true
   split_min_gap_px: 3
   split_gap_fill_ratio: 0.12
   split_min_child_area_ratio: 0.18
   split_max_depth: 4
-  connector_max_value: 75
-  connector_min_area: 80.0
+  connector_max_value: 150
+  connector_min_area: 20.0
   connector_max_area_ratio: 0.25
-  connector_min_aspect_ratio: 1.1
+  connector_min_aspect_ratio: 1.8
   connector_max_aspect_ratio: 7.0
   connector_max_center_offset_norm: 0.45
   connector_mask_erode_px: 5

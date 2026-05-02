@@ -41,6 +41,7 @@ class CardDetection:
     area: float
     rectangularity: float
     aspect_ratio: float
+    vertical_error_deg: float
     score: float
     box_points: Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int], Tuple[int, int]]
     connector: Optional[ConnectorDetection]
@@ -107,6 +108,8 @@ class UsbCardDetectorNode:
         self._max_card_aspect_ratio = self._float_param("~usb_card_detector/max_card_aspect_ratio", 8.0)
         self._min_card_rectangularity = self._float_param("~usb_card_detector/min_card_rectangularity", 0.55)
         self._min_card_extent = self._float_param("~usb_card_detector/min_card_extent", 0.40)
+        self._require_vertical_cards = self._bool_param("~usb_card_detector/require_vertical_cards", True)
+        self._max_vertical_error_deg = self._float_param("~usb_card_detector/max_vertical_error_deg", 20.0)
         self._max_detections = max(1, self._int_param("~usb_card_detector/max_detections", 4))
         self._split_enabled = self._bool_param("~usb_card_detector/split_enabled", True)
         self._split_min_gap_px = max(1, self._int_param("~usb_card_detector/split_min_gap_px", 3))
@@ -250,12 +253,18 @@ class UsbCardDetectorNode:
         if extent < self._min_card_extent:
             return None
 
-        connector = self._detect_connector(bgr, card_mask, contour, rect_area, center_x, center_y)
+        box = cv2.boxPoints(rect).astype(np.int32)
+        vertical_error_deg = self._long_axis_vertical_error_deg(box)
+        if self._require_vertical_cards and vertical_error_deg > self._max_vertical_error_deg:
+            return None
+
+        connector_mask = np.zeros(card_mask.shape, dtype=np.uint8)
+        cv2.drawContours(connector_mask, [contour], -1, 255, thickness=-1)
+        connector = self._detect_connector(bgr, connector_mask, contour, rect_area, center_x, center_y)
         score = area * rectangularity * min(1.5, aspect_ratio)
         if connector is not None:
             score *= 1.35
 
-        box = cv2.boxPoints(rect).astype(np.int32)
         box_points = tuple((int(point[0]), int(point[1])) for point in box)
         return CardDetection(
             center_x=float(center_x),
@@ -266,6 +275,7 @@ class UsbCardDetectorNode:
             area=area,
             rectangularity=rectangularity,
             aspect_ratio=aspect_ratio,
+            vertical_error_deg=vertical_error_deg,
             score=score,
             box_points=box_points,
             connector=connector,
@@ -274,8 +284,9 @@ class UsbCardDetectorNode:
     def _split_card_contour(self, mask: np.ndarray, contour) -> List[Tuple[np.ndarray, object]]:
         component_mask = np.zeros(mask.shape, dtype=np.uint8)
         cv2.drawContours(component_mask, [contour], -1, 255, thickness=-1)
+        component_mask = cv2.bitwise_and(mask, component_mask)
         x, y, width, height = cv2.boundingRect(contour)
-        segments = self._split_mask_roi(component_mask[y : y + height, x : x + width], x, y, 0)
+        segments = self._split_mask_roi(component_mask[y : y + height, x : x + width], x, y, mask.shape, 0)
         result = []
         for segment_mask in segments:
             contours, _ = cv2.findContours(segment_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -289,14 +300,15 @@ class UsbCardDetectorNode:
         roi_mask: np.ndarray,
         offset_x: int,
         offset_y: int,
+        full_shape: Tuple[int, int],
         depth: int,
     ) -> List[np.ndarray]:
         if not self._split_enabled or depth >= self._split_max_depth:
-            return [self._offset_mask(roi_mask, offset_x, offset_y)]
+            return [self._offset_mask(roi_mask, offset_x, offset_y, full_shape)]
 
         split = self._find_best_split(roi_mask)
         if split is None:
-            return [self._offset_mask(roi_mask, offset_x, offset_y)]
+            return [self._offset_mask(roi_mask, offset_x, offset_y, full_shape)]
 
         axis, start, end = split
         first_roi = roi_mask[:start, :] if axis == "y" else roi_mask[:, :start]
@@ -306,15 +318,15 @@ class UsbCardDetectorNode:
         total_area = max(1.0, float(cv2.countNonZero(roi_mask)))
         min_child_area = max(self._min_card_area, total_area * self._split_min_child_area_ratio)
         if first_area < min_child_area or second_area < min_child_area:
-            return [self._offset_mask(roi_mask, offset_x, offset_y)]
+            return [self._offset_mask(roi_mask, offset_x, offset_y, full_shape)]
 
         first_offset_x = offset_x
         first_offset_y = offset_y
         second_offset_x = offset_x if axis == "y" else offset_x + end
         second_offset_y = offset_y + end if axis == "y" else offset_y
         return (
-            self._split_mask_roi(first_roi, first_offset_x, first_offset_y, depth + 1)
-            + self._split_mask_roi(second_roi, second_offset_x, second_offset_y, depth + 1)
+            self._split_mask_roi(first_roi, first_offset_x, first_offset_y, full_shape, depth + 1)
+            + self._split_mask_roi(second_roi, second_offset_x, second_offset_y, full_shape, depth + 1)
         )
 
     def _find_best_split(self, roi_mask: np.ndarray) -> Optional[Tuple[str, int, int]]:
@@ -359,16 +371,18 @@ class UsbCardDetectorNode:
         return best
 
     @staticmethod
-    def _offset_mask(roi_mask: np.ndarray, offset_x: int, offset_y: int) -> np.ndarray:
+    def _offset_mask(
+        roi_mask: np.ndarray,
+        offset_x: int,
+        offset_y: int,
+        full_shape: Tuple[int, int],
+    ) -> np.ndarray:
         points = cv2.findNonZero(roi_mask)
         if points is None:
-            return np.zeros_like(roi_mask)
+            return np.zeros(full_shape, dtype=np.uint8)
         x, y, width, height = cv2.boundingRect(points)
         cropped = roi_mask[y : y + height, x : x + width]
-        full = np.zeros(
-            (offset_y + y + height, offset_x + x + width),
-            dtype=np.uint8,
-        )
+        full = np.zeros(full_shape, dtype=np.uint8)
         full[offset_y + y : offset_y + y + height, offset_x + x : offset_x + x + width] = cropped
         return full
 
@@ -433,6 +447,26 @@ class UsbCardDetectorNode:
                     center_offset_norm=center_offset_norm,
                 )
         return best
+
+    @staticmethod
+    def _long_axis_vertical_error_deg(box_points: np.ndarray) -> float:
+        longest_edge = (0.0, 0.0)
+        longest_length = -1.0
+        for index in range(4):
+            first = box_points[index]
+            second = box_points[(index + 1) % 4]
+            dx = float(second[0] - first[0])
+            dy = float(second[1] - first[1])
+            length = math.sqrt(dx * dx + dy * dy)
+            if length > longest_length:
+                longest_length = length
+                longest_edge = (dx, dy)
+        if longest_length <= 1e-6:
+            return 90.0
+        angle_deg = abs(math.degrees(math.atan2(longest_edge[1], longest_edge[0])))
+        if angle_deg > 90.0:
+            angle_deg = 180.0 - angle_deg
+        return abs(90.0 - angle_deg)
 
     def _publish_detections(self, msg: Image, bgr: np.ndarray, detections: List[CardDetection]) -> None:
         payload = {
@@ -507,6 +541,12 @@ class UsbCardDetectorNode:
                 detection.height,
                 detection.aspect_ratio,
                 detection.rectangularity,
+            )
+            self._draw_label(
+                debug,
+                "vertical_err=%.1fdeg" % detection.vertical_error_deg,
+                (center[0] + 8, min(debug.shape[0] - 8, center[1] + 8)),
+                (0, 255, 255),
             )
             self._draw_label(
                 debug,
@@ -626,6 +666,7 @@ class UsbCardDetectorNode:
             "area": round(detection.area, 3),
             "rectangularity": round(detection.rectangularity, 4),
             "aspect_ratio": round(detection.aspect_ratio, 4),
+            "vertical_error_deg": round(detection.vertical_error_deg, 3),
             "score": round(detection.score, 3),
             "box_points": [list(point) for point in detection.box_points],
             "connector": connector,
