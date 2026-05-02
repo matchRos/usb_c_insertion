@@ -1,0 +1,18 @@
+<launch>
+  <arg name="show_gui" default="false" />
+  <arg name="publish_mask" default="false" />
+
+  <include file="$(find usb_c_insertion)/launch/clear_legacy_params.launch" />
+
+  <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
+  <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
+  <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+
+  <node pkg="usb_c_insertion"
+        type="detect_usb_card_node.py"
+        name="usb_c_insertion_usb_card_detector"
+        output="screen" clear_params="true">
+    <param name="show_gui" value="$(arg show_gui)" />
+    <param name="publish_mask" value="$(arg publish_mask)" />
+  </node>
+</launch>

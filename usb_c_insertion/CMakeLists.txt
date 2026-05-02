@@ -183,6 +183,7 @@ catkin_install_python(PROGRAMS
   scripts/camera_pose_publisher.py
   scripts/center_port_in_image_action_server.py
   scripts/combined_workflow.py
+  scripts/detect_usb_card_node.py
   scripts/estimate_housing_plane_action_server.py
   scripts/extract_cable.py
   scripts/grasp_inserted_cable_workflow.py

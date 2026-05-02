@@ -24,6 +24,7 @@ GLOBAL_CONFIG_NAMESPACES = frozenset(
         "workflow",
         "photo_pose",
         "presentation_snapshots",
+        "usb_card_detector",
         "insertion_workflow",
         "combined_workflow",
         "move_to_pose_profiles",

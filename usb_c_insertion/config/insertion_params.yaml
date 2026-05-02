@@ -312,6 +312,46 @@ presentation_snapshots:
   hsv_upper: [90, 255, 255]
   morph_kernel_size: 5
 
+usb_card_detector:
+  image_topic: "/zedm/zed_node/left/image_rect_color"
+  detections_topic: "/usb_c_insertion/usb_card_detector/detections"
+  debug_image_topic: "/usb_c_insertion/usb_card_detector/debug_image"
+  mask_image_topic: "/usb_c_insertion/usb_card_detector/mask"
+  publish_debug_image: true
+  publish_mask: false
+  show_gui: false
+  debug_window_name: "USB card detector"
+  debug_rate_hz: 5.0
+  log_rate_hz: 1.0
+  image_rotation_deg: 180.0
+  card_min_value: 125
+  card_max_saturation: 85
+  card_min_channel_value: 80
+  card_max_channel_delta: 95
+  mask_overlay_alpha: 0.12
+  morph_kernel_size: 7
+  morph_open_iterations: 1
+  morph_close_iterations: 2
+  min_card_area: 2500.0
+  max_card_area: 250000.0
+  min_card_aspect_ratio: 1.15
+  max_card_aspect_ratio: 8.0
+  min_card_rectangularity: 0.55
+  min_card_extent: 0.40
+  max_detections: 4
+  split_enabled: true
+  split_min_gap_px: 3
+  split_gap_fill_ratio: 0.12
+  split_min_child_area_ratio: 0.18
+  split_max_depth: 4
+  connector_max_value: 75
+  connector_min_area: 80.0
+  connector_max_area_ratio: 0.25
+  connector_min_aspect_ratio: 1.1
+  connector_max_aspect_ratio: 7.0
+  connector_max_center_offset_norm: 0.45
+  connector_mask_erode_px: 5
+
 precontact:
   target_offset_tool_x: -0.0007
   target_offset_tool_y: +0.0018

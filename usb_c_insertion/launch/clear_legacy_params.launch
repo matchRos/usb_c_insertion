@@ -18,6 +18,7 @@
   <group ns="/gripper" clear_params="true" />
   <group ns="/photo_pose" clear_params="true" />
   <group ns="/presentation_snapshots" clear_params="true" />
+  <group ns="/usb_card_detector" clear_params="true" />
   <group ns="/precontact" clear_params="true" />
   <group ns="/workflow" clear_params="true" />
 
