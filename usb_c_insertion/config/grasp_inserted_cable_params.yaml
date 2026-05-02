@@ -1,0 +1,31 @@
+# Overrides for grasping a USB-C cable that is already inserted in the port.
+#
+# The motion/vision pipeline intentionally stays identical to the pre-insertion
+# workflow. Adjust the precontact offsets here while experimenting, without
+# touching the normal insertion defaults.
+precontact:
+  target_offset_tool_x: -0.0007
+  target_offset_tool_y: +0.0018
+  precontact_offset_tool_x: -0.000
+  precontact_offset_tool_y: 0.000
+  precontact_offset_tool_z: -0.01
+  enforce_precontact_standoff: true
+  min_precontact_standoff: 0.008
+
+gripper:
+  open_via_script_command: false
+  open_script_command: ""
+  open_wait_time: 1.0
+  open_digital_outputs:
+    - pin: 0
+      state: true
+    - pin: 1
+      state: false
+  close_via_script_command: false
+  close_script_command: ""
+  close_wait_time: 1.0
+  close_digital_outputs:
+    - pin: 0
+      state: false
+    - pin: 1
+      state: true

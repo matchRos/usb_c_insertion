@@ -297,7 +297,11 @@ class CombinedInsertionWorkflow:
         tcp_precontact_pose = self._helpers.plan_tcp_precontact_pose(updated_port_pose)
         if tcp_precontact_pose is None:
             return self._fail("tcp_precontact", "plan_failed")
-        precontact_final = self._helpers.move_to_pose(tcp_precontact_pose, "tcp_precontact_wait")
+        precontact_final = self._helpers.move_to_pose(
+            tcp_precontact_pose,
+            "tcp_precontact_wait",
+            accurate=True,
+        )
         if precontact_final is None:
             return self._fail("tcp_precontact", "move_failed")
         self._status.publish(

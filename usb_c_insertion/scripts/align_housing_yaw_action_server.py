@@ -54,6 +54,10 @@ class AlignHousingYawActionServer:
         self._action_name = required_str_param("~align_housing_yaw/action_name")
         self._estimate_action_name = required_str_param("~align_housing_yaw/estimate_action_name")
         self._move_action_name = required_str_param("~align_housing_yaw/move_action_name")
+        self._accurate_move_action_name = required_str_param("~align_housing_yaw/accurate_move_action_name")
+        self._accurate_move_after_iteration = required_int_param(
+            "~align_housing_yaw/accurate_move_after_iteration"
+        )
         self._base_frame = required_str_param("~frames/base_frame")
 
         self._default_image_topic = required_str_param("~align_housing_yaw/image_topic")
@@ -74,6 +78,10 @@ class AlignHousingYawActionServer:
         self._tf = TFInterface()
         self._estimate_client = actionlib.SimpleActionClient(self._estimate_action_name, EstimateHousingPlaneAction)
         self._move_client = actionlib.SimpleActionClient(self._move_action_name, MoveToPoseAction)
+        self._accurate_move_client = actionlib.SimpleActionClient(
+            self._accurate_move_action_name,
+            MoveToPoseAction,
+        )
         self._server = actionlib.SimpleActionServer(
             self._action_name,
             AlignHousingYawAction,
@@ -82,10 +90,12 @@ class AlignHousingYawActionServer:
         )
         self._server.start()
         rospy.loginfo(
-            "[usb_c_insertion] event=align_housing_yaw_action_ready action=%s estimate_action=%s move_action=%s yaw_tolerance_rad=%.4f max_iterations=%d max_yaw_step_rad=%.4f tool_axis=(%.3f,%.3f,%.3f) plane_normal_sign=%.1f",
+            "[usb_c_insertion] event=align_housing_yaw_action_ready action=%s estimate_action=%s move_action=%s accurate_move_action=%s accurate_move_after_iteration=%d yaw_tolerance_rad=%.4f max_iterations=%d max_yaw_step_rad=%.4f tool_axis=(%.3f,%.3f,%.3f) plane_normal_sign=%.1f",
             self._action_name,
             self._estimate_action_name,
             self._move_action_name,
+            self._accurate_move_action_name,
+            self._accurate_move_after_iteration,
             self._default_yaw_tolerance_rad,
             self._default_max_iterations,
             self._default_max_yaw_step_rad,
@@ -102,6 +112,9 @@ class AlignHousingYawActionServer:
             return
         if not self._move_client.wait_for_server(rospy.Duration.from_sec(max(0.1, self._move_wait_timeout))):
             self._abort("move_action_unavailable", started_at)
+            return
+        if not self._accurate_move_client.wait_for_server(rospy.Duration.from_sec(max(0.1, self._move_wait_timeout))):
+            self._abort("accurate_move_action_unavailable", started_at)
             return
 
         image_topic = str(goal.image_topic).strip() or self._default_image_topic
@@ -261,7 +274,8 @@ class AlignHousingYawActionServer:
                 total_yaw_command + yaw_command,
                 plane_result,
             )
-            move_result = self._move_to_pose(target_pose, settle_time, move_timeout)
+            correction_number = correction_count + 1
+            move_result = self._move_to_pose(target_pose, settle_time, move_timeout, correction_number)
             if move_result is None or not bool(move_result.success):
                 message = move_result.message if move_result is not None else "no_move_result"
                 error_code = move_result.error_code if move_result is not None else "move_failed"
@@ -312,17 +326,32 @@ class AlignHousingYawActionServer:
             return None
         return self._estimate_client.get_result()
 
-    def _move_to_pose(self, target_pose: PoseStamped, settle_time: float, timeout: float):
+    def _move_to_pose(
+        self,
+        target_pose: PoseStamped,
+        settle_time: float,
+        timeout: float,
+        correction_number: int,
+    ):
         move_goal = MoveToPoseGoal()
         move_goal.target_pose = target_pose
         move_goal.settle_time = float(settle_time)
         move_goal.timeout = float(timeout)
-        self._move_client.send_goal(move_goal)
-        finished = self._move_client.wait_for_result(rospy.Duration.from_sec(max(0.1, float(timeout) + 5.0)))
+        use_accurate = int(correction_number) > max(0, self._accurate_move_after_iteration)
+        client = self._accurate_move_client if use_accurate else self._move_client
+        action_name = self._accurate_move_action_name if use_accurate else self._move_action_name
+        rospy.loginfo(
+            "[usb_c_insertion] event=align_housing_yaw_move_goal correction=%d action=%s accurate=%s",
+            int(correction_number),
+            action_name,
+            str(use_accurate).lower(),
+        )
+        client.send_goal(move_goal)
+        finished = client.wait_for_result(rospy.Duration.from_sec(max(0.1, float(timeout) + 5.0)))
         if not finished:
-            self._move_client.cancel_goal()
+            client.cancel_goal()
             return None
-        return self._move_client.get_result()
+        return client.get_result()
 
     def _build_yaw_target_pose(self, current_pose: PoseStamped, yaw_command: float) -> PoseStamped:
         target_pose = PoseStamped()
@@ -565,6 +594,7 @@ class AlignHousingYawActionServer:
     def _cancel_children(self) -> None:
         self._estimate_client.cancel_goal()
         self._move_client.cancel_goal()
+        self._accurate_move_client.cancel_goal()
 
     @staticmethod
     def _limit_yaw_step(yaw_error: float, max_yaw_step_rad: float) -> float:

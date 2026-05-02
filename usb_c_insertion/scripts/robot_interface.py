@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import List, Tuple
 
 from geometry_msgs.msg import PoseStamped, Twist
 import rospy
@@ -13,7 +14,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
-from param_utils import required_bool_param, required_int_param, required_str_param
+from param_utils import get_param, required_bool_param, required_float_param, required_int_param, required_str_param
 
 
 class RobotInterface:
@@ -24,16 +25,37 @@ class RobotInterface:
     command flows through the same smoothing and watchdog path.
     """
 
-    def __init__(self, queue_size: int = 10):
-        self._raw_twist_topic = required_str_param("~topics/raw_twist_cmd")
-        self._pose_target_topic = required_str_param("~topics/pose_target")
-        self._pose_servo_enable_topic = required_str_param("~topics/pose_servo_enable")
-        self._script_command_topic = required_str_param("~topics/script_command")
+    def __init__(
+        self,
+        queue_size: int = 10,
+        raw_twist_topic: str = "",
+        pose_target_topic: str = "",
+        pose_servo_enable_topic: str = "",
+        script_command_topic: str = "",
+    ):
+        self._raw_twist_topic = raw_twist_topic or required_str_param("~topics/raw_twist_cmd")
+        self._pose_target_topic = pose_target_topic or required_str_param("~topics/pose_target")
+        self._pose_servo_enable_topic = pose_servo_enable_topic or required_str_param("~topics/pose_servo_enable")
+        self._script_command_topic = script_command_topic or required_str_param("~topics/script_command")
         self._open_via_script_command = required_bool_param("~gripper/open_via_script_command")
         self._open_script_command = required_str_param("~gripper/open_script_command")
+        self._open_wait_time = required_float_param("~gripper/open_wait_time")
+        self._close_via_script_command = required_bool_param("~gripper/close_via_script_command")
+        self._close_script_command = required_str_param("~gripper/close_script_command")
+        self._close_wait_time = required_float_param("~gripper/close_wait_time")
         self._io_service_name = required_str_param("~gripper/io_service_name")
         self._fallback_digital_output_pin = required_int_param("~gripper/fallback_digital_output_pin")
         self._fallback_digital_output_state = required_bool_param("~gripper/fallback_digital_output_state")
+        self._fallback_close_digital_output_pin = required_int_param("~gripper/fallback_close_digital_output_pin")
+        self._fallback_close_digital_output_state = required_bool_param("~gripper/fallback_close_digital_output_state")
+        self._open_digital_outputs = self._load_digital_outputs(
+            "~gripper/open_digital_outputs",
+            [(self._fallback_digital_output_pin, self._fallback_digital_output_state)],
+        )
+        self._close_digital_outputs = self._load_digital_outputs(
+            "~gripper/close_digital_outputs",
+            [(self._fallback_close_digital_output_pin, self._fallback_close_digital_output_state)],
+        )
         self._stop_repeat_count = required_int_param("~motion/stop_repeat_count")
 
         self._raw_twist_publisher = rospy.Publisher(self._raw_twist_topic, Twist, queue_size=queue_size)
@@ -123,17 +145,31 @@ class RobotInterface:
         if self._open_via_script_command and self._open_script_command:
             self._script_command_publisher.publish(String(data=self._open_script_command))
             rospy.loginfo("[usb_c_insertion] event=gripper_open_command mode=script_command")
+            self._wait_after_gripper_command(self._open_wait_time)
             return True
 
-        if self.set_digital_output(self._fallback_digital_output_pin, self._fallback_digital_output_state):
-            rospy.loginfo(
-                "[usb_c_insertion] event=gripper_open_command mode=digital_output pin=%d state=%s",
-                self._fallback_digital_output_pin,
-                str(self._fallback_digital_output_state).lower(),
-            )
+        if self._set_digital_outputs(self._open_digital_outputs, "gripper_open_command"):
+            self._wait_after_gripper_command(self._open_wait_time)
             return True
 
         rospy.logerr("[usb_c_insertion] event=gripper_open_command_failed")
+        return False
+
+    def close_gripper(self) -> bool:
+        """
+        Close the gripper using a configured script command or digital output fallback.
+        """
+        if self._close_via_script_command and self._close_script_command:
+            self._script_command_publisher.publish(String(data=self._close_script_command))
+            rospy.loginfo("[usb_c_insertion] event=gripper_close_command mode=script_command")
+            self._wait_after_gripper_command(self._close_wait_time)
+            return True
+
+        if self._set_digital_outputs(self._close_digital_outputs, "gripper_close_command"):
+            self._wait_after_gripper_command(self._close_wait_time)
+            return True
+
+        rospy.logerr("[usb_c_insertion] event=gripper_close_command_failed")
         return False
 
     def wait_for_motion_pipeline(self, timeout: float = 2.0, require_pose_servo: bool = False) -> bool:
@@ -176,3 +212,72 @@ class RobotInterface:
         except (rospy.ROSException, rospy.ServiceException) as exc:
             rospy.logerr("[usb_c_insertion] event=set_digital_output_failed pin=%d error=%s", int(pin), exc)
             return False
+
+    def _set_digital_outputs(self, outputs: List[Tuple[int, bool]], event_name: str) -> bool:
+        if not outputs:
+            rospy.logerr("[usb_c_insertion] event=%s mode=digital_output reason=no_outputs_configured", event_name)
+            return False
+
+        for pin, state in outputs:
+            if not self.set_digital_output(pin, state):
+                rospy.logerr(
+                    "[usb_c_insertion] event=%s mode=digital_output pin=%d state=%s result=failed",
+                    event_name,
+                    pin,
+                    str(state).lower(),
+                )
+                return False
+            rospy.loginfo(
+                "[usb_c_insertion] event=%s mode=digital_output pin=%d state=%s",
+                event_name,
+                pin,
+                str(state).lower(),
+            )
+        return True
+
+    def _load_digital_outputs(
+        self,
+        param_name: str,
+        default_outputs: List[Tuple[int, bool]],
+    ) -> List[Tuple[int, bool]]:
+        value = get_param(param_name, None)
+        if value is None:
+            return list(default_outputs)
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("Invalid ROS parameter: %s expected list, got %r" % (param_name, value))
+
+        outputs = []
+        for item in value:
+            if isinstance(item, dict):
+                pin = item.get("pin")
+                state = item.get("state")
+            elif isinstance(item, (list, tuple)) and len(item) == 2:
+                pin, state = item
+            else:
+                raise ValueError(
+                    "Invalid ROS parameter: %s entries must be {pin, state} or [pin, state], got %r"
+                    % (param_name, item)
+                )
+            if pin is None or state is None:
+                raise ValueError("Invalid ROS parameter: %s entry missing pin/state: %r" % (param_name, item))
+            outputs.append((int(pin), self._coerce_bool(state, param_name)))
+
+        return outputs or list(default_outputs)
+
+    @staticmethod
+    def _coerce_bool(value, param_name: str) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in ("true", "1", "yes", "on"):
+                return True
+            if normalized in ("false", "0", "no", "off"):
+                return False
+            raise ValueError("Invalid boolean ROS parameter in %s: %r" % (param_name, value))
+        return bool(value)
+
+    @staticmethod
+    def _wait_after_gripper_command(wait_time: float) -> None:
+        if wait_time > 0.0:
+            rospy.sleep(wait_time)

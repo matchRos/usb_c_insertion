@@ -15,7 +15,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
-from param_utils import required_bool_param, required_float_param, required_str_param
+from param_utils import get_param, required_bool_param, required_float_param, required_str_param
 from robot_interface import RobotInterface
 from usb_c_insertion.msg import (
     MoveToPoseAction,
@@ -35,20 +35,44 @@ class MoveToPoseActionServer:
     """
 
     def __init__(self):
-        self._action_name = "move_to_pose"
+        self._action_name = str(get_param("~action_name", "move_to_pose")).strip() or "move_to_pose"
+        self._profile_name = str(get_param("~profile", "normal")).strip() or "normal"
         self._base_frame = required_str_param("~frames/base_frame")
-        self._default_settle_time = required_float_param("~motion/action_settle_time")
-        self._default_timeout = required_float_param("~motion/action_timeout")
+        self._default_settle_time = self._profile_float(
+            "action_settle_time",
+            required_float_param("~motion/action_settle_time"),
+        )
+        self._default_timeout = self._profile_float(
+            "action_timeout",
+            required_float_param("~motion/action_timeout"),
+        )
         self._feedback_rate = required_float_param("~motion/action_feedback_rate")
         self._pipeline_wait_timeout = required_float_param("~motion/action_pipeline_wait_timeout")
         self._enforce_workspace_limits = required_bool_param("~motion/enforce_workspace_limits")
         self._min_target_x = required_float_param("~motion/min_target_x")
         self._min_target_z = required_float_param("~motion/min_target_z")
-        self._position_tolerance = required_float_param("~motion/pose_servo_position_tolerance")
-        self._orientation_tolerance = required_float_param("~motion/pose_servo_orientation_tolerance")
-        self._status_topic = required_str_param("~topics/pose_servo_status")
+        self._position_tolerance = self._profile_float(
+            "position_tolerance",
+            required_float_param("~motion/pose_servo_position_tolerance"),
+        )
+        self._orientation_tolerance = self._profile_float(
+            "orientation_tolerance",
+            required_float_param("~motion/pose_servo_orientation_tolerance"),
+        )
+        self._pose_target_topic = str(
+            get_param("~pose_target_topic", required_str_param("~topics/pose_target"))
+        ).strip()
+        self._pose_servo_enable_topic = str(
+            get_param("~pose_servo_enable_topic", required_str_param("~topics/pose_servo_enable"))
+        ).strip()
+        self._status_topic = str(
+            get_param("~pose_servo_status_topic", required_str_param("~topics/pose_servo_status"))
+        ).strip()
 
-        self._robot = RobotInterface()
+        self._robot = RobotInterface(
+            pose_target_topic=self._pose_target_topic,
+            pose_servo_enable_topic=self._pose_servo_enable_topic,
+        )
         self._latest_status: Optional[PoseServoStatus] = None
         self._status_subscriber = rospy.Subscriber(
             self._status_topic,
@@ -64,8 +88,14 @@ class MoveToPoseActionServer:
         )
         self._server.start()
         rospy.loginfo(
-            "[usb_c_insertion] event=move_to_pose_action_ready action=%s",
+            "[usb_c_insertion] event=move_to_pose_action_ready action=%s profile=%s pose_target_topic=%s pose_servo_enable_topic=%s pose_servo_status_topic=%s position_tolerance=%.5f orientation_tolerance=%.5f",
             self._action_name,
+            self._profile_name,
+            self._pose_target_topic,
+            self._pose_servo_enable_topic,
+            self._status_topic,
+            self._position_tolerance,
+            self._orientation_tolerance,
         )
 
     def _execute(self, goal) -> None:
@@ -292,6 +322,17 @@ class MoveToPoseActionServer:
     @staticmethod
     def _goal_or_default(value: float, default: float) -> float:
         return float(value) if float(value) > 0.0 else float(default)
+
+    def _profile_float(self, key: str, default: float) -> float:
+        private_name = "~%s" % key
+        value = get_param(private_name, None)
+        if value is not None:
+            return float(value)
+
+        global_name = "/move_to_pose_profiles/%s/%s" % (self._profile_name, key)
+        if rospy.has_param(global_name):
+            return float(rospy.get_param(global_name))
+        return float(default)
 
     def _is_target_allowed(self, target_pose: PoseStamped) -> bool:
         if not self._enforce_workspace_limits:

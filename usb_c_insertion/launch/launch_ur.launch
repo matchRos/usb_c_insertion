@@ -43,6 +43,17 @@
         output="screen" clear_params="true">
     </node>
 
+    <node
+        name="usb_c_insertion_pose_servo_accurate"
+        pkg="usb_c_insertion"
+        type="pose_servo_node.py"
+        output="screen" clear_params="true">
+        <param name="profile" value="accurate"/>
+        <param name="pose_target_topic" value="/usb_c_insertion/pose_target_accurate"/>
+        <param name="pose_servo_enable_topic" value="/usb_c_insertion/pose_servo_enable_accurate"/>
+        <param name="pose_servo_status_topic" value="/usb_c_insertion/pose_servo_status_accurate"/>
+    </node>
+
     <node name="camera_pose_publisher" pkg="usb_c_insertion" type="camera_pose_publisher.py" output="screen" clear_params="true">
         <param name="camera_frame" value="usb_c_zedm_left_camera_optical_frame"/>
         <param name="camera_pose_publish_rate" value="10.0"/>

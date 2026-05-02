@@ -51,7 +51,8 @@ class PreinsertWorkflowHelpers:
         self.base_frame = self._required_str_param("~frames/base_frame")
         self.tool_frame = self._required_str_param("~frames/tool_frame")
 
-        self._move_action_name = "move_to_pose"
+        self._move_action_name = self._required_str_param("~workflow/move_action_name")
+        self._accurate_move_action_name = self._required_str_param("~workflow/accurate_move_action_name")
         self._vision_service_name = "run_vision"
         self._align_action_name = self._required_str_param("~align_housing_yaw/action_name")
         self._center_action_name = self._required_str_param("~center_port/action_name")
@@ -60,6 +61,8 @@ class PreinsertWorkflowHelpers:
 
         self._move_settle_time = self._required_float_param("~photo_pose/settle_time")
         self._move_timeout = self._required_float_param("~photo_pose/timeout")
+        self._accurate_move_settle_time = self._required_float_param("~workflow/accurate_move_settle_time")
+        self._accurate_move_timeout = self._required_float_param("~workflow/accurate_move_timeout")
         self._require_fresh_vision = self._required_bool_param("~photo_pose/require_fresh_vision_result")
         self._refine_camera_frame = self._required_str_param("~workflow/refine_camera_frame")
         self._refine_camera_distance = self._required_float_param("~workflow/refine_camera_distance")
@@ -82,6 +85,10 @@ class PreinsertWorkflowHelpers:
 
         self._tf = TFInterface()
         self._move_client = actionlib.SimpleActionClient(self._move_action_name, MoveToPoseAction)
+        self._accurate_move_client = actionlib.SimpleActionClient(
+            self._accurate_move_action_name,
+            MoveToPoseAction,
+        )
         self._align_client = actionlib.SimpleActionClient(self._align_action_name, AlignHousingYawAction)
         self._center_client = actionlib.SimpleActionClient(self._center_action_name, CenterPortInImageAction)
         self._estimate_client = actionlib.SimpleActionClient(self._estimate_action_name, EstimateHousingPlaneAction)
@@ -141,6 +148,11 @@ class PreinsertWorkflowHelpers:
     def wait_for_dependencies(self) -> bool:
         checks = (
             (self._move_client, self._move_action_name, "move_action_unavailable"),
+            (
+                self._accurate_move_client,
+                self._accurate_move_action_name,
+                "accurate_move_action_unavailable",
+            ),
             (self._align_client, self._align_action_name, "align_housing_yaw_action_unavailable"),
             (self._center_client, self._center_action_name, "center_port_action_unavailable"),
             (self._estimate_client, self._estimate_action_name, "estimate_housing_plane_action_unavailable"),
@@ -177,25 +189,38 @@ class PreinsertWorkflowHelpers:
         pose.pose.orientation.w = qw
         return pose
 
-    def move_to_pose(self, pose: PoseStamped, name: str, timeout: Optional[float] = None) -> Optional[PoseStamped]:
+    def move_to_pose(
+        self,
+        pose: PoseStamped,
+        name: str,
+        timeout: Optional[float] = None,
+        accurate: bool = False,
+    ) -> Optional[PoseStamped]:
         goal = MoveToPoseGoal()
         goal.target_pose = pose
-        goal.settle_time = self._move_settle_time
-        goal.timeout = self._move_timeout if timeout is None else float(timeout)
+        goal.settle_time = self._accurate_move_settle_time if accurate else self._move_settle_time
+        default_timeout = self._accurate_move_timeout if accurate else self._move_timeout
+        goal.timeout = default_timeout if timeout is None else float(timeout)
+        client = self._accurate_move_client if accurate else self._move_client
+        action_name = self._accurate_move_action_name if accurate else self._move_action_name
         rospy.loginfo(
-            "[usb_c_insertion] event=preinsert_move_goal_sent name=%s x=%.4f y=%.4f z=%.4f",
+            "[usb_c_insertion] event=preinsert_move_goal_sent name=%s action=%s accurate=%s x=%.4f y=%.4f z=%.4f settle_time=%.2f timeout=%.2f",
             name,
+            action_name,
+            str(bool(accurate)).lower(),
             pose.pose.position.x,
             pose.pose.position.y,
             pose.pose.position.z,
+            goal.settle_time,
+            goal.timeout,
         )
-        self._move_client.send_goal(goal, feedback_cb=self._move_feedback_callback)
-        finished = self._move_client.wait_for_result(rospy.Duration.from_sec(max(1.0, goal.timeout + 5.0)))
+        client.send_goal(goal, feedback_cb=self._move_feedback_callback)
+        finished = client.wait_for_result(rospy.Duration.from_sec(max(1.0, goal.timeout + 5.0)))
         if not finished:
-            self._move_client.cancel_goal()
+            client.cancel_goal()
             rospy.logerr("[usb_c_insertion] event=preinsert_workflow_failed reason=move_timeout name=%s", name)
             return None
-        result = self._move_client.get_result()
+        result = client.get_result()
         if result is None or not bool(result.success):
             message = result.message if result is not None else "no_result"
             error_code = result.error_code if result is not None else "move_no_result"

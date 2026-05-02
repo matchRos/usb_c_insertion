@@ -39,6 +39,18 @@
 
   <node unless="$(arg publish_vision_pose_only)"
         pkg="usb_c_insertion"
+        type="move_to_pose_action_server.py"
+        name="usb_c_insertion_move_to_pose_accurate_action_server"
+        output="screen" clear_params="true">
+    <param name="action_name" value="move_to_pose_accurate" />
+    <param name="profile" value="accurate" />
+    <param name="pose_target_topic" value="/usb_c_insertion/pose_target_accurate" />
+    <param name="pose_servo_enable_topic" value="/usb_c_insertion/pose_servo_enable_accurate" />
+    <param name="pose_servo_status_topic" value="/usb_c_insertion/pose_servo_status_accurate" />
+  </node>
+
+  <node unless="$(arg publish_vision_pose_only)"
+        pkg="usb_c_insertion"
         type="align_housing_yaw_action_server.py"
         name="usb_c_insertion_align_housing_yaw_action_server"
         output="screen" clear_params="true">

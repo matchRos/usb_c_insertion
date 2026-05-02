@@ -15,7 +15,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
-from param_utils import required_float_param, required_str_param
+from param_utils import get_param, required_float_param, required_str_param
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
 from usb_c_insertion.msg import PoseServoStatus
@@ -30,9 +30,14 @@ class PoseServoNode:
     """
 
     def __init__(self):
-        self._target_topic = required_str_param("~topics/pose_target")
-        self._enable_topic = required_str_param("~topics/pose_servo_enable")
-        self._status_topic = required_str_param("~topics/pose_servo_status")
+        self._profile_name = str(get_param("~profile", "")).strip()
+        self._target_topic = str(get_param("~pose_target_topic", required_str_param("~topics/pose_target"))).strip()
+        self._enable_topic = str(
+            get_param("~pose_servo_enable_topic", required_str_param("~topics/pose_servo_enable"))
+        ).strip()
+        self._status_topic = str(
+            get_param("~pose_servo_status_topic", required_str_param("~topics/pose_servo_status"))
+        ).strip()
 
         self._command_rate = required_float_param("~motion/command_rate")
         self._position_kp = required_float_param("~motion/pose_servo_position_kp")
@@ -40,10 +45,22 @@ class PoseServoNode:
         self._position_kd = required_float_param("~motion/pose_servo_position_kd")
         self._position_integral_limit = required_float_param("~motion/pose_servo_position_integral_limit")
         self._orientation_gain = required_float_param("~motion/pose_servo_orientation_gain")
-        self._position_tolerance = required_float_param("~motion/pose_servo_position_tolerance")
-        self._orientation_tolerance = required_float_param("~motion/pose_servo_orientation_tolerance")
-        self._max_linear_speed = required_float_param("~motion/max_linear_speed")
-        self._max_angular_speed = required_float_param("~motion/max_angular_speed")
+        self._position_tolerance = self._profile_float(
+            "position_tolerance",
+            required_float_param("~motion/pose_servo_position_tolerance"),
+        )
+        self._orientation_tolerance = self._profile_float(
+            "orientation_tolerance",
+            required_float_param("~motion/pose_servo_orientation_tolerance"),
+        )
+        self._max_linear_speed = self._profile_float(
+            "max_linear_speed",
+            required_float_param("~motion/max_linear_speed"),
+        )
+        self._max_angular_speed = self._profile_float(
+            "max_angular_speed",
+            required_float_param("~motion/max_angular_speed"),
+        )
 
         self._tf = TFInterface()
         self._robot = RobotInterface()
@@ -62,6 +79,17 @@ class PoseServoNode:
 
         self._target_subscriber = rospy.Subscriber(self._target_topic, PoseStamped, self._target_callback, queue_size=1)
         self._enable_subscriber = rospy.Subscriber(self._enable_topic, Bool, self._enable_callback, queue_size=1)
+        rospy.loginfo(
+            "[usb_c_insertion] event=pose_servo_ready profile=%s target_topic=%s enable_topic=%s status_topic=%s max_linear_speed=%.4f max_angular_speed=%.4f position_tolerance=%.5f orientation_tolerance=%.5f",
+            self._profile_name or "motion",
+            self._target_topic,
+            self._enable_topic,
+            self._status_topic,
+            self._max_linear_speed,
+            self._max_angular_speed,
+            self._position_tolerance,
+            self._orientation_tolerance,
+        )
 
     def spin(self) -> None:
         rate = rospy.Rate(max(1.0, self._command_rate))
@@ -234,6 +262,18 @@ class PoseServoNode:
             return (0.0, 0.0, 0.0)
         scale = min(1.0, max(0.0, float(max_norm)) / norm)
         return tuple(component * scale for component in vector_xyz)
+
+    def _profile_float(self, key: str, default: float) -> float:
+        private_name = "~%s" % key
+        value = get_param(private_name, None)
+        if value is not None:
+            return float(value)
+
+        if self._profile_name:
+            global_name = "/pose_servo_profiles/%s/%s" % (self._profile_name, key)
+            if rospy.has_param(global_name):
+                return float(rospy.get_param(global_name))
+        return float(default)
 
     @staticmethod
     def _quaternion_error_vector(current_orientation, target_orientation):

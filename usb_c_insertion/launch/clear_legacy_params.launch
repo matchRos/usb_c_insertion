@@ -12,6 +12,8 @@
   <group ns="/verify" clear_params="true" />
   <group ns="/insertion_workflow" clear_params="true" />
   <group ns="/combined_workflow" clear_params="true" />
+  <group ns="/move_to_pose_profiles" clear_params="true" />
+  <group ns="/pose_servo_profiles" clear_params="true" />
   <group ns="/extract" clear_params="true" />
   <group ns="/gripper" clear_params="true" />
   <group ns="/photo_pose" clear_params="true" />

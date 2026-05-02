@@ -1,0 +1,16 @@
+<launch>
+  <arg name="grasp_params" default="$(find usb_c_insertion)/config/grasp_inserted_cable_params.yaml" />
+
+  <include file="$(find usb_c_insertion)/launch/clear_legacy_params.launch" />
+
+  <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
+  <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
+  <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+  <rosparam command="load" file="$(arg grasp_params)" />
+
+  <node pkg="usb_c_insertion"
+        type="grasp_inserted_cable_workflow.py"
+        name="usb_c_insertion_grasp_inserted_cable_workflow"
+        output="screen" clear_params="true">
+  </node>
+</launch>

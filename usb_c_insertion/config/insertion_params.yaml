@@ -1,6 +1,6 @@
 motion:
-  max_linear_speed: 0.05
-  max_angular_speed: 0.25
+  max_linear_speed: 0.08
+  max_angular_speed: 0.35
   max_linear_acceleration: 0.03
   max_angular_acceleration: 0.15
   twist_smoothing_alpha: 0.25
@@ -22,6 +22,25 @@ motion:
   min_target_z: 0.0
   stop_repeat_count: 3
   command_rate: 500.0
+
+move_to_pose_profiles:
+  normal:
+    position_tolerance: 0.0015
+    orientation_tolerance: 0.02
+    action_settle_time: 0.10
+    action_timeout: 60.0
+  accurate:
+    position_tolerance: 0.0002
+    orientation_tolerance: 0.003
+    action_settle_time: 0.35
+    action_timeout: 90.0
+
+pose_servo_profiles:
+  accurate:
+    max_linear_speed: 0.012
+    max_angular_speed: 0.08
+    position_tolerance: 0.0002
+    orientation_tolerance: 0.003
 
 micro_motion:
   max_distance: 0.02
@@ -117,6 +136,8 @@ align_housing_yaw:
   action_name: "align_housing_yaw"
   estimate_action_name: "estimate_housing_plane"
   move_action_name: "move_to_pose"
+  accurate_move_action_name: "move_to_pose_accurate"
+  accurate_move_after_iteration: 1
   image_topic: "/zedm/zed_node/left/image_rect_color"
   cloud_topic: "/zedm/zed_node/point_cloud/cloud_registered"
   estimate_timeout: 3.0
@@ -252,8 +273,16 @@ extract:
 gripper:
   open_via_script_command: false
   open_script_command: ""
+  open_wait_time: 0.0
+  open_digital_outputs: []
+  close_via_script_command: false
+  close_script_command: ""
+  close_wait_time: 0.0
+  close_digital_outputs: []
   fallback_digital_output_pin: 0
   fallback_digital_output_state: true
+  fallback_close_digital_output_pin: 0
+  fallback_close_digital_output_state: false
   io_service_name: "/ur_hardware_interface/set_io"
 
 photo_pose:
@@ -295,6 +324,10 @@ precontact:
 workflow:
   run_vision_timeout: 180.0
   vision_result_wait_timeout: 5.0
+  move_action_name: "move_to_pose"
+  accurate_move_action_name: "move_to_pose_accurate"
+  accurate_move_settle_time: 0.35
+  accurate_move_timeout: 90.0
   refine_camera_frame: "usb_c_zedm_left_camera_optical_frame"
   refine_camera_distance: 0.14
   refine_yaw_delta_sign: 1.0

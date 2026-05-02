@@ -116,7 +116,7 @@ class PreinsertAlignmentWorkflow:
         tcp_precontact_pose = self._helpers.plan_tcp_precontact_pose(updated_port_pose)
         if tcp_precontact_pose is None:
             return False
-        if self._helpers.move_to_pose(tcp_precontact_pose, "tcp_precontact_wait") is None:
+        if self._helpers.move_to_pose(tcp_precontact_pose, "tcp_precontact_wait", accurate=True) is None:
             return False
 
         rospy.loginfo(

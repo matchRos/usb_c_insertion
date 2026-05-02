@@ -26,6 +26,8 @@ GLOBAL_CONFIG_NAMESPACES = frozenset(
         "presentation_snapshots",
         "insertion_workflow",
         "combined_workflow",
+        "move_to_pose_profiles",
+        "pose_servo_profiles",
     )
 )
 
