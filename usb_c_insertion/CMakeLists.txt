@@ -197,6 +197,7 @@ catkin_install_python(PROGRAMS
   scripts/pose_servo_node.py
   scripts/run_vision_service.py
   scripts/twist_controller_node.py
+  scripts/usb_card_target_selector.py
   scripts/verify_insertion_action_server.py
   scripts/verify_looming_action_server.py
   scripts/vision_pose_publisher.py

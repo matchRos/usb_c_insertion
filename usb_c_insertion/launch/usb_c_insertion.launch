@@ -2,12 +2,21 @@
   <arg name="vision_pose_json_path" default="/tmp/green_sticker_location.json" />
   <arg name="publish_vision_pose_only" default="false" />
   <arg name="run_vision_script_path" default="$(find usb_c_insertion)/scripts/run_vision.sh" />
+  <arg name="target_card_index" default="1" />
 
   <include file="$(find usb_c_insertion)/launch/clear_legacy_params.launch" />
 
   <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
   <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
   <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+  <param name="/workflow/target_card_index" value="$(arg target_card_index)" />
+
+  <node unless="$(arg publish_vision_pose_only)"
+        pkg="usb_c_insertion"
+        type="detect_usb_card_node.py"
+        name="usb_c_insertion_usb_card_detector"
+        output="screen" clear_params="true">
+  </node>
 
   <node unless="$(arg publish_vision_pose_only)"
         pkg="usb_c_insertion"

@@ -16,12 +16,14 @@ from geometry_msgs.msg import PoseStamped
 import numpy as np
 import rospy
 from sensor_msgs.msg import Image
+from std_msgs.msg import String
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from param_utils import (
+    get_param,
     required_bool_param,
     required_float_param,
     required_int_param,
@@ -31,6 +33,7 @@ from param_utils import (
 from prepose_planner import rotate_vector_by_quaternion
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
+from usb_card_target_selector import UsbCardTargetSelector
 from usb_c_insertion.msg import (
     VerifyLoomingAction,
     VerifyLoomingFeedback,
@@ -86,6 +89,14 @@ class VerifyLoomingActionServer:
         self._morph_kernel_size = max(0, required_int_param("~looming/morph_kernel_size"))
         self._foe_debug_enabled = required_bool_param("~looming/foe_debug_enabled")
         self._foe_debug_output_dir = required_str_param("~looming/foe_debug_output_dir")
+        self._detection_source = str(get_param("~looming/detection_source", "green_marker")).strip().lower()
+        self._usb_card_detections_topic = str(
+            get_param(
+                "~looming/usb_card_detections_topic",
+                get_param("~usb_card_detector/detections_topic", "/usb_c_insertion/usb_card_detector/detections"),
+            )
+        ).strip()
+        self._usb_card_selector = UsbCardTargetSelector.from_ros_params("looming")
         self._motion_pipeline_wait_timeout = required_float_param("~motion/action_pipeline_wait_timeout")
 
         self._robot = RobotInterface()
@@ -93,9 +104,11 @@ class VerifyLoomingActionServer:
         self._lock = RLock()
         self._image_topic = ""
         self._image_subscriber = None
+        self._usb_card_detections_subscriber = None
         self._latest_detection: Optional[GreenBlobDetection] = None
 
         self._subscribe_image_topic(self._default_image_topic)
+        self._subscribe_usb_card_detections()
         self._server = actionlib.SimpleActionServer(
             self._action_name,
             VerifyLoomingAction,
@@ -105,15 +118,19 @@ class VerifyLoomingActionServer:
         rospy.on_shutdown(self._handle_shutdown)
         self._server.start()
         rospy.loginfo(
-            "[usb_c_insertion] event=verify_looming_action_ready action=%s image_topic=%s image_rotation_deg=%.1f",
+            "[usb_c_insertion] event=verify_looming_action_ready action=%s image_topic=%s detection_source=%s usb_card_detections_topic=%s target_card_index=%d image_rotation_deg=%.1f",
             self._action_name,
             self._image_topic,
+            self._detection_source,
+            self._usb_card_detections_topic,
+            self._usb_card_selector.target_card_index,
             self._image_rotation_deg,
         )
 
     def _execute(self, goal) -> None:
         image_topic = str(goal.image_topic).strip() or self._default_image_topic
         self._subscribe_image_topic(image_topic)
+        self._subscribe_usb_card_detections()
 
         travel_distance = abs(self._goal_or_default(goal.travel_distance, self._default_travel_distance))
         travel_speed = abs(self._goal_or_default(goal.travel_speed, self._default_travel_speed))
@@ -299,6 +316,8 @@ class VerifyLoomingActionServer:
             self._image_subscriber = rospy.Subscriber(topic, Image, self._image_callback, queue_size=1)
 
     def _image_callback(self, msg: Image) -> None:
+        if self._uses_usb_card_detector():
+            return
         try:
             detection = self._detect_green_blob(msg)
         except ValueError as exc:
@@ -309,6 +328,24 @@ class VerifyLoomingActionServer:
                 found=False,
                 message=str(exc),
             )
+        with self._lock:
+            self._latest_detection = detection
+
+    def _usb_card_detections_callback(self, msg: String) -> None:
+        if not self._uses_usb_card_detector():
+            return
+        target = self._usb_card_selector.select_from_json(msg.data)
+        detection = GreenBlobDetection(
+            stamp=target.stamp,
+            image_width=target.image_width,
+            image_height=target.image_height,
+            found=target.found,
+            center_x=target.center_x,
+            center_y=target.center_y,
+            area=target.area,
+            aspect_ratio=target.aspect_ratio,
+            message=target.message,
+        )
         with self._lock:
             self._latest_detection = detection
 
@@ -450,12 +487,31 @@ class VerifyLoomingActionServer:
                 center_y=detection.center_y,
                 area=detection.area,
                 aspect_ratio=detection.aspect_ratio,
-                message="green_blob_too_small",
+                message="%s_too_small" % self._target_label(),
                 bgr=detection.bgr,
                 gray=detection.gray,
                 mask=detection.mask,
             )
         return detection
+
+    def _subscribe_usb_card_detections(self) -> None:
+        if not self._uses_usb_card_detector() or not self._usb_card_detections_topic:
+            return
+        with self._lock:
+            if self._usb_card_detections_subscriber is not None:
+                return
+            self._usb_card_detections_subscriber = rospy.Subscriber(
+                self._usb_card_detections_topic,
+                String,
+                self._usb_card_detections_callback,
+                queue_size=1,
+            )
+
+    def _uses_usb_card_detector(self) -> bool:
+        return self._detection_source in ("usb_card", "usb_card_detector", "card")
+
+    def _target_label(self) -> str:
+        return "usb_card_target" if self._uses_usb_card_detector() else "green_blob"
 
     def _publish_feedback(
         self,

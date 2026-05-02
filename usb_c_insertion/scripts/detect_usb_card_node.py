@@ -111,6 +111,25 @@ class UsbCardDetectorNode:
         self._require_vertical_cards = self._bool_param("~usb_card_detector/require_vertical_cards", True)
         self._max_vertical_error_deg = self._float_param("~usb_card_detector/max_vertical_error_deg", 20.0)
         self._max_detections = max(1, self._int_param("~usb_card_detector/max_detections", 4))
+        self._card_order_axis = self._str_param("~usb_card_detector/card_order_axis", "x").lower()
+        self._card_order_direction = self._str_param("~usb_card_detector/card_order_direction", "ascending").lower()
+        self._require_card_group = self._bool_param("~usb_card_detector/require_card_group", True)
+        self._min_cards_in_group = max(1, self._int_param("~usb_card_detector/min_cards_in_group", 2))
+        self._group_max_center_y_delta_px = self._float_param("~usb_card_detector/group_max_center_y_delta_px", 45.0)
+        self._group_max_center_x_gap_px = self._float_param("~usb_card_detector/group_max_center_x_gap_px", 120.0)
+        self._group_max_center_x_gap_ratio = self._float_param("~usb_card_detector/group_max_center_x_gap_ratio", 0.55)
+        self._group_max_long_side_delta_ratio = self._float_param(
+            "~usb_card_detector/group_max_long_side_delta_ratio",
+            0.35,
+        )
+        self._group_max_short_side_delta_ratio = self._float_param(
+            "~usb_card_detector/group_max_short_side_delta_ratio",
+            0.45,
+        )
+        self._group_max_vertical_error_delta_deg = self._float_param(
+            "~usb_card_detector/group_max_vertical_error_delta_deg",
+            10.0,
+        )
         self._split_enabled = self._bool_param("~usb_card_detector/split_enabled", True)
         self._split_min_gap_px = max(1, self._int_param("~usb_card_detector/split_min_gap_px", 3))
         self._split_gap_fill_ratio = max(
@@ -123,12 +142,12 @@ class UsbCardDetectorNode:
         )
         self._split_max_depth = max(0, self._int_param("~usb_card_detector/split_max_depth", 4))
 
-        self._connector_max_value = self._int_param("~usb_card_detector/connector_max_value", 75)
+        self._connector_max_value = self._int_param("~usb_card_detector/connector_max_value", 150)
         self._connector_min_area = self._float_param("~usb_card_detector/connector_min_area", 80.0)
         self._connector_max_area_ratio = self._float_param("~usb_card_detector/connector_max_area_ratio", 0.25)
         self._connector_min_aspect_ratio = self._float_param(
             "~usb_card_detector/connector_min_aspect_ratio",
-            1.1,
+            1.8,
         )
         self._connector_max_aspect_ratio = self._float_param(
             "~usb_card_detector/connector_max_aspect_ratio",
@@ -139,6 +158,10 @@ class UsbCardDetectorNode:
             0.45,
         )
         self._connector_mask_erode_px = max(0, self._int_param("~usb_card_detector/connector_mask_erode_px", 5))
+        self._connector_morph_kernel_size = max(
+            0,
+            self._int_param("~usb_card_detector/connector_morph_kernel_size", 3),
+        )
 
         self._last_debug_publish = rospy.Time(0)
         self._last_log = rospy.Time(0)
@@ -218,9 +241,85 @@ class UsbCardDetectorNode:
                 if detection is not None:
                     candidates.append(detection)
 
+        candidates = self._filter_card_group(candidates)
         candidates.sort(key=lambda item: item.score, reverse=True)
         selected = candidates[: self._max_detections]
-        return sorted(selected, key=lambda item: item.center_y)
+        return self._sort_detections_for_indexing(selected)
+
+    def _filter_card_group(self, candidates: List[CardDetection]) -> List[CardDetection]:
+        if not self._require_card_group:
+            return candidates
+        if self._min_cards_in_group <= 1:
+            return candidates
+        if len(candidates) < self._min_cards_in_group:
+            return []
+
+        groups: List[List[CardDetection]] = []
+        current_group: List[CardDetection] = []
+        for candidate in sorted(candidates, key=lambda item: item.center_x):
+            if not current_group:
+                current_group = [candidate]
+                continue
+            if self._cards_are_group_neighbors(current_group[-1], candidate):
+                current_group.append(candidate)
+                continue
+            groups.append(current_group)
+            current_group = [candidate]
+        if current_group:
+            groups.append(current_group)
+
+        groups = [group for group in groups if len(group) >= self._min_cards_in_group]
+        if not groups:
+            return []
+        groups.sort(
+            key=lambda group: (
+                len(group),
+                sum(card.score for card in group),
+                -self._group_center_y_spread(group),
+            ),
+            reverse=True,
+        )
+        return groups[0]
+
+    def _cards_are_group_neighbors(self, first: CardDetection, second: CardDetection) -> bool:
+        center_y_delta = abs(float(first.center_y) - float(second.center_y))
+        if center_y_delta > max(0.0, self._group_max_center_y_delta_px):
+            return False
+
+        center_x_gap = abs(float(first.center_x) - float(second.center_x))
+        average_long_side = 0.5 * (float(first.width) + float(second.width))
+        max_center_x_gap = max(
+            max(0.0, self._group_max_center_x_gap_px),
+            max(0.0, self._group_max_center_x_gap_ratio) * average_long_side,
+        )
+        if center_x_gap > max_center_x_gap:
+            return False
+
+        if self._relative_delta(first.width, second.width) > max(0.0, self._group_max_long_side_delta_ratio):
+            return False
+        if self._relative_delta(first.height, second.height) > max(0.0, self._group_max_short_side_delta_ratio):
+            return False
+
+        vertical_error_delta = abs(float(first.vertical_error_deg) - float(second.vertical_error_deg))
+        return vertical_error_delta <= max(0.0, self._group_max_vertical_error_delta_deg)
+
+    @staticmethod
+    def _relative_delta(first: float, second: float) -> float:
+        return abs(float(first) - float(second)) / max(1e-6, max(abs(float(first)), abs(float(second))))
+
+    @staticmethod
+    def _group_center_y_spread(group: List[CardDetection]) -> float:
+        values = [float(card.center_y) for card in group]
+        return max(values) - min(values) if values else 0.0
+
+    def _sort_detections_for_indexing(self, detections: List[CardDetection]) -> List[CardDetection]:
+        axis = self._card_order_axis
+        reverse = self._card_order_direction in ("descending", "desc", "reverse")
+        if axis == "y":
+            return sorted(detections, key=lambda item: item.center_y, reverse=reverse)
+        if axis == "score":
+            return sorted(detections, key=lambda item: item.score, reverse=reverse)
+        return sorted(detections, key=lambda item: item.center_x, reverse=reverse)
 
     def _build_card_detection(
         self,
@@ -403,8 +502,10 @@ class UsbCardDetectorNode:
             inner_mask = cv2.erode(inner_mask, kernel, iterations=1)
 
         dark_mask = np.where((gray <= int(self._connector_max_value)) & (inner_mask > 0), 255, 0).astype(np.uint8)
-        kernel = np.ones((3, 3), dtype=np.uint8)
-        dark_mask = cv2.morphologyEx(dark_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        kernel_size = int(self._connector_morph_kernel_size)
+        if kernel_size > 1:
+            kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
+            dark_mask = cv2.morphologyEx(dark_mask, cv2.MORPH_OPEN, kernel, iterations=1)
         contours, _ = cv2.findContours(dark_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         best = None

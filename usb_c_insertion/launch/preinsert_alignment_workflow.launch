@@ -1,9 +1,12 @@
 <launch>
+  <arg name="target_card_index" default="1" />
+
   <include file="$(find usb_c_insertion)/launch/clear_legacy_params.launch" />
 
   <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
   <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
   <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+  <param name="/workflow/target_card_index" value="$(arg target_card_index)" />
 
   <node pkg="usb_c_insertion"
         type="preinsert_alignment_workflow.py"

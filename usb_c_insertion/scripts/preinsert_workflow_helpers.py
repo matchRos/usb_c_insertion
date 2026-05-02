@@ -37,6 +37,7 @@ from usb_c_insertion.msg import (
     VerifyLoomingGoal,
 )
 from usb_c_insertion.srv import RunVision, RunVisionRequest
+from param_utils import get_param
 
 
 class PreinsertWorkflowHelpers:
@@ -54,6 +55,30 @@ class PreinsertWorkflowHelpers:
         self._move_action_name = self._required_str_param("~workflow/move_action_name")
         self._accurate_move_action_name = self._required_str_param("~workflow/accurate_move_action_name")
         self._vision_service_name = "run_vision"
+        self._overview_vision_mode = str(get_param("~workflow/overview_vision_mode", "legacy")).strip().lower()
+        self._target_card_index = int(get_param("~workflow/target_card_index", 1))
+        self._usb_card_coarse_camera_move_enabled = self._optional_bool_param(
+            "~workflow/usb_card_coarse_camera_move_enabled",
+            True,
+        )
+        self._usb_card_refine_yaw_after_coarse_move = self._optional_bool_param(
+            "~workflow/usb_card_refine_yaw_after_coarse_move",
+            True,
+        )
+        self._usb_card_coarse_target_point = str(
+            get_param("~workflow/usb_card_coarse_target_point", "card_center")
+        ).strip().lower()
+        self._usb_card_coarse_require_connector = self._optional_bool_param(
+            "~workflow/usb_card_coarse_require_connector",
+            False,
+        )
+        self._usb_card_final_target_point = str(
+            get_param("~workflow/usb_card_final_target_point", "connector")
+        ).strip().lower()
+        self._usb_card_final_require_connector = self._optional_bool_param(
+            "~workflow/usb_card_final_require_connector",
+            True,
+        )
         self._align_action_name = self._required_str_param("~align_housing_yaw/action_name")
         self._center_action_name = self._required_str_param("~center_port/action_name")
         self._estimate_action_name = self._required_str_param("~housing_plane/action_name")
@@ -145,6 +170,19 @@ class PreinsertWorkflowHelpers:
             raise ValueError("Invalid boolean ROS parameter: %s (%s)=%r" % (name, resolved_name, value))
         return bool(value)
 
+    @staticmethod
+    def _optional_bool_param(name: str, default: bool) -> bool:
+        value = get_param(name, default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in ("true", "1", "yes", "on"):
+                return True
+            if normalized in ("false", "0", "no", "off"):
+                return False
+        return bool(value)
+
     def wait_for_dependencies(self) -> bool:
         checks = (
             (self._move_client, self._move_action_name, "move_action_unavailable"),
@@ -162,15 +200,46 @@ class PreinsertWorkflowHelpers:
             if not client.wait_for_server(rospy.Duration.from_sec(5.0)):
                 rospy.logerr("[usb_c_insertion] event=preinsert_workflow_failed reason=%s action=%s", error_code, name)
                 return False
-        try:
-            rospy.wait_for_service(self._vision_service_name, timeout=5.0)
-        except rospy.ROSException:
-            rospy.logerr(
-                "[usb_c_insertion] event=preinsert_workflow_failed reason=vision_service_unavailable service=%s",
-                self._vision_service_name,
-            )
-            return False
+        if self.uses_legacy_overview_vision():
+            try:
+                rospy.wait_for_service(self._vision_service_name, timeout=5.0)
+            except rospy.ROSException:
+                rospy.logerr(
+                    "[usb_c_insertion] event=preinsert_workflow_failed reason=vision_service_unavailable service=%s",
+                    self._vision_service_name,
+                )
+                return False
         return True
+
+    def uses_legacy_overview_vision(self) -> bool:
+        return self._overview_vision_mode in ("legacy", "run_vision", "green_marker", "green")
+
+    def uses_usb_card_overview_vision(self) -> bool:
+        return self._overview_vision_mode in ("usb_card", "usb_card_detector", "card")
+
+    def overview_vision_mode(self) -> str:
+        return self._overview_vision_mode
+
+    def target_card_index(self) -> int:
+        return self._target_card_index
+
+    def usb_card_coarse_camera_move_enabled(self) -> bool:
+        return self._usb_card_coarse_camera_move_enabled
+
+    def usb_card_refine_yaw_after_coarse_move(self) -> bool:
+        return self._usb_card_refine_yaw_after_coarse_move
+
+    def usb_card_coarse_target_point(self) -> str:
+        return self._usb_card_coarse_target_point
+
+    def usb_card_coarse_require_connector(self) -> bool:
+        return self._usb_card_coarse_require_connector
+
+    def usb_card_final_target_point(self) -> str:
+        return self._usb_card_final_target_point
+
+    def usb_card_final_require_connector(self) -> bool:
+        return self._usb_card_final_require_connector
 
     def load_overview_pose(self) -> PoseStamped:
         pose = PoseStamped()
@@ -273,14 +342,16 @@ class PreinsertWorkflowHelpers:
         current_quaternion = self._pose_quaternion(current_tool_pose)
 
         try:
-            target_camera_xyz, plane_normal_yaw = self._desired_camera_position_and_yaw(port_pose)
-            target_tool_quaternion = self._keep_current_roll_pitch_with_target_tool_z_yaw(
+            port_quaternion = self._pose_quaternion(port_pose)
+            port_x_axis = rotate_vector_by_quaternion(1.0, 0.0, 0.0, *port_quaternion)
+            target_tool_xyz, target_tool_quaternion = self._plan_tool_pose_for_camera_target(
+                (
+                    port_pose.pose.position.x,
+                    port_pose.pose.position.y,
+                    port_pose.pose.position.z,
+                ),
+                port_x_axis,
                 current_quaternion,
-                plane_normal_yaw,
-            )
-            target_tool_xyz = self._camera_target_to_tool_position(
-                target_camera_xyz,
-                target_tool_quaternion,
                 tool_to_camera,
             )
         except ValueError as exc:
@@ -304,6 +375,60 @@ class PreinsertWorkflowHelpers:
             "[usb_c_insertion] event=preinsert_camera_pose_planned camera_frame=%s distance=%.4f tool_x=%.4f tool_y=%.4f tool_z=%.4f",
             self._refine_camera_frame,
             self._refine_camera_distance,
+            target_tool_xyz[0],
+            target_tool_xyz[1],
+            target_tool_xyz[2],
+        )
+        return target_pose
+
+    def plan_camera_pose_from_plane(self, plane_result, label: str) -> Optional[PoseStamped]:
+        tool_to_camera = self._tf.lookup_transform(self.tool_frame, self._refine_camera_frame)
+        if tool_to_camera is None:
+            rospy.logerr(
+                "[usb_c_insertion] event=preinsert_workflow_failed reason=camera_tf_unavailable tool_frame=%s camera_frame=%s",
+                self.tool_frame,
+                self._refine_camera_frame,
+            )
+            return None
+        current_tool_pose = self._tf.get_tool_pose_in_base()
+        if current_tool_pose is None:
+            rospy.logerr("[usb_c_insertion] event=preinsert_workflow_failed reason=current_tool_pose_unavailable")
+            return None
+        point = plane_result.marker_plane_point_base.point
+        normal = plane_result.plane_normal_base
+        try:
+            target_tool_xyz, target_tool_quaternion = self._plan_tool_pose_for_camera_target(
+                (point.x, point.y, point.z),
+                (normal.x, normal.y, normal.z),
+                self._pose_quaternion(current_tool_pose),
+                tool_to_camera,
+            )
+        except ValueError as exc:
+            rospy.logerr(
+                "[usb_c_insertion] event=preinsert_workflow_failed reason=plan_camera_pose_from_plane_failed label=%s message=%s",
+                label,
+                exc,
+            )
+            return None
+
+        target_pose = PoseStamped()
+        target_pose.header.stamp = rospy.Time.now()
+        target_pose.header.frame_id = self.base_frame
+        target_pose.pose.position.x = target_tool_xyz[0]
+        target_pose.pose.position.y = target_tool_xyz[1]
+        target_pose.pose.position.z = target_tool_xyz[2]
+        target_pose.pose.orientation.x = target_tool_quaternion[0]
+        target_pose.pose.orientation.y = target_tool_quaternion[1]
+        target_pose.pose.orientation.z = target_tool_quaternion[2]
+        target_pose.pose.orientation.w = target_tool_quaternion[3]
+        rospy.loginfo(
+            "[usb_c_insertion] event=preinsert_camera_pose_from_plane_planned label=%s camera_frame=%s distance=%.4f normal_base=(%.4f,%.4f,%.4f) tool_x=%.4f tool_y=%.4f tool_z=%.4f",
+            label,
+            self._refine_camera_frame,
+            self._refine_camera_distance,
+            normal.x,
+            normal.y,
+            normal.z,
             target_tool_xyz[0],
             target_tool_xyz[1],
             target_tool_xyz[2],
@@ -393,38 +518,55 @@ class PreinsertWorkflowHelpers:
     def latest_center_port_result(self):
         return self._last_center_port_result
 
-    def estimate_housing_plane(self, label: str):
-        goal = self._build_estimate_goal()
-        self._estimate_client.send_goal(goal)
-        finished = self._estimate_client.wait_for_result(rospy.Duration.from_sec(max(0.1, goal.timeout + 2.0)))
-        if not finished:
-            self._estimate_client.cancel_goal()
-            rospy.logerr("[usb_c_insertion] event=preinsert_workflow_failed reason=estimate_plane_timeout label=%s", label)
-            return None
-        result = self._estimate_client.get_result()
-        if result is None or not bool(result.success):
-            message = result.message if result is not None else "no_result"
-            error_code = result.error_code if result is not None else "estimate_no_result"
-            rospy.logerr(
-                "[usb_c_insertion] event=preinsert_workflow_failed reason=estimate_plane_failed label=%s error_code=%s message=%s",
-                label,
-                error_code,
-                message,
-            )
-            return None
-        rospy.loginfo(
-            "[usb_c_insertion] event=preinsert_plane_estimated label=%s ratio=%.3f rms=%.4f marker_point_base=(%.4f,%.4f,%.4f) normal_base=(%.4f,%.4f,%.4f)",
-            label,
-            result.inlier_ratio,
-            result.rms_error,
-            result.marker_plane_point_base.point.x,
-            result.marker_plane_point_base.point.y,
-            result.marker_plane_point_base.point.z,
-            result.plane_normal_base.x,
-            result.plane_normal_base.y,
-            result.plane_normal_base.z,
+    def estimate_housing_plane(
+        self,
+        label: str,
+        usb_card_target_point: Optional[str] = None,
+        usb_card_require_connector: Optional[bool] = None,
+    ):
+        previous_target = self._temporary_housing_plane_usb_card_target(
+            usb_card_target_point,
+            usb_card_require_connector,
         )
-        return result
+        try:
+            goal = self._build_estimate_goal()
+            self._estimate_client.send_goal(goal)
+            finished = self._estimate_client.wait_for_result(rospy.Duration.from_sec(max(0.1, goal.timeout + 2.0)))
+            if not finished:
+                self._estimate_client.cancel_goal()
+                rospy.logerr(
+                    "[usb_c_insertion] event=preinsert_workflow_failed reason=estimate_plane_timeout label=%s",
+                    label,
+                )
+                return None
+            result = self._estimate_client.get_result()
+            if result is None or not bool(result.success):
+                message = result.message if result is not None else "no_result"
+                error_code = result.error_code if result is not None else "estimate_no_result"
+                rospy.logerr(
+                    "[usb_c_insertion] event=preinsert_workflow_failed reason=estimate_plane_failed label=%s error_code=%s message=%s",
+                    label,
+                    error_code,
+                    message,
+                )
+                return None
+            rospy.loginfo(
+                "[usb_c_insertion] event=preinsert_plane_estimated label=%s target_point=%s require_connector=%s ratio=%.3f rms=%.4f marker_point_base=(%.4f,%.4f,%.4f) normal_base=(%.4f,%.4f,%.4f)",
+                label,
+                str(usb_card_target_point or "configured"),
+                str(usb_card_require_connector if usb_card_require_connector is not None else "configured").lower(),
+                result.inlier_ratio,
+                result.rms_error,
+                result.marker_plane_point_base.point.x,
+                result.marker_plane_point_base.point.y,
+                result.marker_plane_point_base.point.z,
+                result.plane_normal_base.x,
+                result.plane_normal_base.y,
+                result.plane_normal_base.z,
+            )
+            return result
+        finally:
+            self._restore_housing_plane_usb_card_target(previous_target)
 
     def verify_looming(self):
         goal = VerifyLoomingGoal()
@@ -619,17 +761,68 @@ class PreinsertWorkflowHelpers:
         goal.use_largest_component = self._required_bool_param("~housing_plane/use_largest_component")
         return goal
 
-    def _desired_camera_position_and_yaw(self, port_pose: PoseStamped):
-        port_quaternion = self._pose_quaternion(port_pose)
-        port_x_axis = rotate_vector_by_quaternion(1.0, 0.0, 0.0, *port_quaternion)
-        camera_z_axis = normalize_vector((-port_x_axis[0], -port_x_axis[1], -port_x_axis[2]))
-        camera_xyz = (
-            port_pose.pose.position.x - camera_z_axis[0] * self._refine_camera_distance,
-            port_pose.pose.position.y - camera_z_axis[1] * self._refine_camera_distance,
-            port_pose.pose.position.z - camera_z_axis[2] * self._refine_camera_distance,
+    def _temporary_housing_plane_usb_card_target(
+        self,
+        target_point: Optional[str],
+        require_connector: Optional[bool],
+    ):
+        if target_point is None and require_connector is None:
+            return None
+        target_param = "/housing_plane/usb_card_target_point"
+        require_param = "/housing_plane/usb_card_require_connector"
+        previous = {
+            target_param: (rospy.has_param(target_param), rospy.get_param(target_param) if rospy.has_param(target_param) else None),
+            require_param: (
+                rospy.has_param(require_param),
+                rospy.get_param(require_param) if rospy.has_param(require_param) else None,
+            ),
+        }
+        if target_point is not None:
+            rospy.set_param(target_param, str(target_point).strip().lower())
+        if require_connector is not None:
+            rospy.set_param(require_param, bool(require_connector))
+        rospy.loginfo(
+            "[usb_c_insertion] event=preinsert_housing_plane_target_override target_point=%s require_connector=%s",
+            str(target_point if target_point is not None else previous[target_param][1]),
+            str(require_connector if require_connector is not None else previous[require_param][1]).lower(),
         )
-        plane_normal_yaw = math.atan2(port_x_axis[1], port_x_axis[0])
-        return camera_xyz, plane_normal_yaw
+        return previous
+
+    @staticmethod
+    def _restore_housing_plane_usb_card_target(previous) -> None:
+        if previous is None:
+            return
+        for name, (existed, value) in previous.items():
+            if existed:
+                rospy.set_param(name, value)
+            elif rospy.has_param(name):
+                rospy.delete_param(name)
+
+    def _plan_tool_pose_for_camera_target(
+        self,
+        target_point_xyz,
+        plane_normal_xyz,
+        current_tool_quaternion,
+        tool_to_camera,
+    ):
+        plane_normal = normalize_vector(plane_normal_xyz)
+        camera_z_axis = normalize_vector((-plane_normal[0], -plane_normal[1], -plane_normal[2]))
+        camera_xyz = (
+            target_point_xyz[0] - camera_z_axis[0] * self._refine_camera_distance,
+            target_point_xyz[1] - camera_z_axis[1] * self._refine_camera_distance,
+            target_point_xyz[2] - camera_z_axis[2] * self._refine_camera_distance,
+        )
+        plane_normal_yaw = math.atan2(plane_normal[1], plane_normal[0])
+        target_tool_quaternion = self._keep_current_roll_pitch_with_target_tool_z_yaw(
+            current_tool_quaternion,
+            plane_normal_yaw,
+        )
+        target_tool_xyz = self._camera_target_to_tool_position(
+            camera_xyz,
+            target_tool_quaternion,
+            tool_to_camera,
+        )
+        return target_tool_xyz, target_tool_quaternion
 
     def _keep_current_roll_pitch_with_target_tool_z_yaw(self, current_tool_quaternion, plane_normal_yaw: float):
         current_roll, current_pitch, current_yaw = euler_from_quaternion(current_tool_quaternion)

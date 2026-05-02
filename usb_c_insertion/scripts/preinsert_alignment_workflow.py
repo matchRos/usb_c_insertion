@@ -36,7 +36,11 @@ class PreinsertAlignmentWorkflow:
         )
 
     def run(self) -> bool:
-        rospy.loginfo("[usb_c_insertion] event=preinsert_workflow_start")
+        rospy.loginfo(
+            "[usb_c_insertion] event=preinsert_workflow_start overview_vision_mode=%s target_card_index=%d",
+            self._helpers.overview_vision_mode(),
+            self._helpers.target_card_index(),
+        )
 
         if not self._helpers.wait_for_dependencies():
             return False
@@ -45,20 +49,27 @@ class PreinsertAlignmentWorkflow:
         if self._helpers.move_to_pose(overview_pose, "overview_pose") is None:
             return False
 
-        coarse_port_pose = self._helpers.run_overview_vision()
-        if coarse_port_pose is None:
-            return False
-        self._snapshots.capture_port_pose_axes(
-            "01_overview_initial_port_estimate.png",
-            "01 Overview position",
-            coarse_port_pose,
-        )
+        if self._helpers.uses_legacy_overview_vision():
+            coarse_port_pose = self._helpers.run_overview_vision()
+            if coarse_port_pose is None:
+                return False
+            self._snapshots.capture_port_pose_axes(
+                "01_overview_initial_port_estimate.png",
+                "01 Overview position",
+                coarse_port_pose,
+            )
 
-        camera_pose = self._helpers.plan_camera_pose_from_port(coarse_port_pose)
-        if camera_pose is None:
-            return False
-        if self._helpers.move_to_pose(camera_pose, "camera_to_coarse_port") is None:
-            return False
+            camera_pose = self._helpers.plan_camera_pose_from_port(coarse_port_pose)
+            if camera_pose is None:
+                return False
+            if self._helpers.move_to_pose(camera_pose, "camera_to_coarse_port") is None:
+                return False
+        else:
+            rospy.loginfo(
+                "[usb_c_insertion] event=preinsert_overview_vision_skipped mode=%s target_card_index=%d",
+                self._helpers.overview_vision_mode(),
+                self._helpers.target_card_index(),
+            )
         self._snapshots.capture_current_view(
             "02_camera_at_initial_estimate.png",
             "02 Camera at initial estimate",
@@ -71,17 +82,56 @@ class PreinsertAlignmentWorkflow:
             "03 After yaw alignment",
         )
 
+        if (
+            self._helpers.uses_usb_card_overview_vision()
+            and self._helpers.usb_card_coarse_camera_move_enabled()
+        ):
+            coarse_plane = self._helpers.estimate_housing_plane(
+                "coarse_card_depth_update",
+                usb_card_target_point=self._helpers.usb_card_coarse_target_point(),
+                usb_card_require_connector=self._helpers.usb_card_coarse_require_connector(),
+            )
+            if coarse_plane is None:
+                return False
+            if not self._helpers.validate_plane_quality(coarse_plane, "coarse_card_depth_update"):
+                return False
+
+            camera_pose = self._helpers.plan_camera_pose_from_plane(
+                coarse_plane,
+                "coarse_card_depth_update",
+            )
+            if camera_pose is None:
+                return False
+            if self._helpers.move_to_pose(camera_pose, "camera_to_usb_card_coarse", accurate=True) is None:
+                return False
+            self._snapshots.capture_current_view(
+                "04_camera_at_usb_card_coarse.png",
+                "04 Camera at USB card coarse estimate",
+            )
+
+            if self._helpers.usb_card_refine_yaw_after_coarse_move():
+                if not self._helpers.align_housing_yaw():
+                    return False
+                self._snapshots.capture_marker_alignment(
+                    "05_after_usb_card_refine_yaw.png",
+                    "05 After USB card refine yaw",
+                )
+
         if self._helpers.center_port_in_image() is None:
             return False
         self._snapshots.capture_marker_alignment(
-            "04_centered_over_port.png",
-            "04 Camera over circle center",
+            "06_centered_over_port.png",
+            "06 Camera over port center",
             fallback_marker_center=PresentationSnapshotRecorder.center_from_center_result(
                 self._helpers.latest_center_port_result()
             ),
         )
 
-        orientation_check = self._helpers.estimate_housing_plane("orientation_check")
+        orientation_check = self._helpers.estimate_housing_plane(
+            "orientation_check",
+            usb_card_target_point=self._helpers.usb_card_final_target_point(),
+            usb_card_require_connector=self._helpers.usb_card_final_require_connector(),
+        )
         if orientation_check is None:
             return False
         if not self._helpers.validate_plane_quality(orientation_check, "orientation_check"):
@@ -97,12 +147,16 @@ class PreinsertAlignmentWorkflow:
         if marker_center is None:
             marker_center = PresentationSnapshotRecorder.center_from_looming_result(looming_result)
         self._snapshots.capture_marker_alignment(
-            "05_after_verify_looming.png",
-            "05 After looming verification",
+            "07_after_verify_looming.png",
+            "07 After looming verification",
             fallback_marker_center=marker_center,
         )
 
-        final_plane = self._helpers.estimate_housing_plane("final_depth_update")
+        final_plane = self._helpers.estimate_housing_plane(
+            "final_depth_update",
+            usb_card_target_point=self._helpers.usb_card_final_target_point(),
+            usb_card_require_connector=self._helpers.usb_card_final_require_connector(),
+        )
         if final_plane is None:
             return False
         if not self._helpers.validate_plane_quality(final_plane, "final_depth_update"):

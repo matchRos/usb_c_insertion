@@ -17,12 +17,14 @@ import numpy as np
 import rospy
 from sensor_msgs.msg import Image, PointCloud2
 import sensor_msgs.point_cloud2 as point_cloud2
+from std_msgs.msg import String
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from param_utils import (
+    get_param,
     required_bool_param,
     required_float_param,
     required_int_param,
@@ -31,6 +33,7 @@ from param_utils import (
 )
 from prepose_planner import rotate_vector_by_quaternion
 from tf_interface import TFInterface
+from usb_card_target_selector import UsbCardTargetSelector
 from usb_c_insertion.msg import (
     EstimateHousingPlaneAction,
     EstimateHousingPlaneFeedback,
@@ -101,6 +104,14 @@ class EstimateHousingPlaneActionServer:
         self._hsv_lower = self._read_hsv_param("~housing_plane/hsv_lower")
         self._hsv_upper = self._read_hsv_param("~housing_plane/hsv_upper")
         self._morph_kernel_size = max(0, required_int_param("~housing_plane/morph_kernel_size"))
+        self._detection_source = str(get_param("~housing_plane/detection_source", "green_marker")).strip().lower()
+        self._usb_card_detections_topic = str(
+            get_param(
+                "~housing_plane/usb_card_detections_topic",
+                get_param("~usb_card_detector/detections_topic", "/usb_c_insertion/usb_card_detector/detections"),
+            )
+        ).strip()
+        self._usb_card_selector = UsbCardTargetSelector.from_ros_params("housing_plane")
 
         self._tf = TFInterface()
         self._lock = RLock()
@@ -108,11 +119,13 @@ class EstimateHousingPlaneActionServer:
         self._cloud_topic = ""
         self._image_subscriber = None
         self._cloud_subscriber = None
+        self._usb_card_detections_subscriber = None
         self._latest_detection: Optional[GreenBlobDetection] = None
         self._latest_cloud: Optional[PointCloud2] = None
 
         self._subscribe_image_topic(self._default_image_topic)
         self._subscribe_cloud_topic(self._default_cloud_topic)
+        self._subscribe_usb_card_detections()
         self._server = actionlib.SimpleActionServer(
             self._action_name,
             EstimateHousingPlaneAction,
@@ -121,10 +134,13 @@ class EstimateHousingPlaneActionServer:
         )
         self._server.start()
         rospy.loginfo(
-            "[usb_c_insertion] event=estimate_housing_plane_action_ready action=%s image_topic=%s cloud_topic=%s base_transform_frame=%s cloud_to_base_transform_rotation=%s image_rotation_deg=%.1f",
+            "[usb_c_insertion] event=estimate_housing_plane_action_ready action=%s image_topic=%s cloud_topic=%s detection_source=%s usb_card_detections_topic=%s target_card_index=%d base_transform_frame=%s cloud_to_base_transform_rotation=%s image_rotation_deg=%.1f",
             self._action_name,
             self._image_topic,
             self._cloud_topic,
+            self._detection_source,
+            self._usb_card_detections_topic,
+            self._usb_card_selector.target_card_index,
             self._base_transform_frame or "<cloud_frame>",
             self._cloud_to_base_transform_rotation,
             self._image_rotation_deg,
@@ -134,8 +150,10 @@ class EstimateHousingPlaneActionServer:
         started_at = rospy.Time.now()
         image_topic = str(goal.image_topic).strip() or self._default_image_topic
         cloud_topic = str(goal.cloud_topic).strip() or self._default_cloud_topic
+        self._refresh_usb_card_selector()
         self._subscribe_image_topic(image_topic)
         self._subscribe_cloud_topic(cloud_topic)
+        self._subscribe_usb_card_detections()
 
         timeout = self._goal_or_default(goal.timeout, self._default_timeout)
         min_blob_area = self._goal_or_default(goal.min_blob_area, self._default_min_blob_area)
@@ -154,7 +172,7 @@ class EstimateHousingPlaneActionServer:
         deadline = started_at + rospy.Duration.from_sec(max(0.1, timeout))
         detection, cloud = self._wait_for_inputs(deadline, min_blob_area)
         if detection is None:
-            self._abort("marker_not_found", started_at)
+            self._abort("%s_not_found" % self._target_label(), started_at)
             return
         if cloud is None:
             self._abort("cloud_not_available", started_at, detection)
@@ -327,6 +345,8 @@ class EstimateHousingPlaneActionServer:
             self._cloud_subscriber = rospy.Subscriber(topic, PointCloud2, self._cloud_callback, queue_size=1)
 
     def _image_callback(self, msg: Image) -> None:
+        if self._uses_usb_card_detector():
+            return
         try:
             detection = self._detect_green_blob(msg)
         except ValueError as exc:
@@ -340,9 +360,71 @@ class EstimateHousingPlaneActionServer:
         with self._lock:
             self._latest_detection = detection
 
+    def _usb_card_detections_callback(self, msg: String) -> None:
+        if not self._uses_usb_card_detector():
+            return
+        target = self._usb_card_selector.select_from_json(msg.data)
+        detection = GreenBlobDetection(
+            stamp=target.stamp,
+            image_width=target.image_width,
+            image_height=target.image_height,
+            found=target.found,
+            center_x=target.center_x,
+            center_y=target.center_y,
+            area=target.area,
+            message=target.message,
+        )
+        with self._lock:
+            self._latest_detection = detection
+
     def _cloud_callback(self, msg: PointCloud2) -> None:
         with self._lock:
             self._latest_cloud = msg
+
+    def _subscribe_usb_card_detections(self) -> None:
+        if not self._uses_usb_card_detector() or not self._usb_card_detections_topic:
+            return
+        with self._lock:
+            if self._usb_card_detections_subscriber is not None:
+                return
+            self._usb_card_detections_subscriber = rospy.Subscriber(
+                self._usb_card_detections_topic,
+                String,
+                self._usb_card_detections_callback,
+                queue_size=1,
+            )
+
+    def _refresh_usb_card_selector(self) -> None:
+        if not self._uses_usb_card_detector():
+            return
+        next_selector = UsbCardTargetSelector.from_ros_params("housing_plane")
+        previous_selector = self._usb_card_selector
+        changed = (
+            previous_selector.target_card_index != next_selector.target_card_index
+            or previous_selector.target_point != next_selector.target_point
+            or previous_selector.require_connector != next_selector.require_connector
+            or previous_selector.order_axis != next_selector.order_axis
+            or previous_selector.order_direction != next_selector.order_direction
+        )
+        if not changed:
+            return
+        with self._lock:
+            self._usb_card_selector = next_selector
+            self._latest_detection = None
+        rospy.loginfo(
+            "[usb_c_insertion] event=estimate_housing_plane_usb_card_selector_updated target_card_index=%d target_point=%s require_connector=%s order_axis=%s order_direction=%s",
+            next_selector.target_card_index,
+            next_selector.target_point,
+            str(next_selector.require_connector).lower(),
+            next_selector.order_axis,
+            next_selector.order_direction,
+        )
+
+    def _uses_usb_card_detector(self) -> bool:
+        return self._detection_source in ("usb_card", "usb_card_detector", "card")
+
+    def _target_label(self) -> str:
+        return "usb_card_target" if self._uses_usb_card_detector() else "marker"
 
     def _detect_green_blob(self, msg: Image) -> GreenBlobDetection:
         bgr = self._rotate_image_for_processing(self._image_to_bgr(msg))

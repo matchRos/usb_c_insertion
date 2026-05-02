@@ -15,12 +15,14 @@ from geometry_msgs.msg import PoseStamped
 import numpy as np
 import rospy
 from sensor_msgs.msg import Image
+from std_msgs.msg import String
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from param_utils import (
+    get_param,
     required_bool_param,
     required_float_param,
     required_int_param,
@@ -30,6 +32,7 @@ from param_utils import (
 from prepose_planner import rotate_vector_by_quaternion
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
+from usb_card_target_selector import UsbCardTargetSelector
 from usb_c_insertion.msg import (
     CenterPortInImageAction,
     CenterPortInImageFeedback,
@@ -96,6 +99,14 @@ class CenterPortInImageActionServer:
         self._hsv_lower = self._read_hsv_param("~center_port/hsv_lower")
         self._hsv_upper = self._read_hsv_param("~center_port/hsv_upper")
         self._morph_kernel_size = max(0, required_int_param("~center_port/morph_kernel_size"))
+        self._detection_source = str(get_param("~center_port/detection_source", "green_marker")).strip().lower()
+        self._usb_card_detections_topic = str(
+            get_param(
+                "~center_port/usb_card_detections_topic",
+                get_param("~usb_card_detector/detections_topic", "/usb_c_insertion/usb_card_detector/detections"),
+            )
+        ).strip()
+        self._usb_card_selector = UsbCardTargetSelector.from_ros_params("center_port")
         self._motion_pipeline_wait_timeout = required_float_param("~motion/action_pipeline_wait_timeout")
         self._pose_servo_status_topic = required_str_param("~topics/pose_servo_status")
         self._coarse_pose_servo_enabled = required_bool_param("~center_port/coarse_pose_servo_enabled")
@@ -115,10 +126,12 @@ class CenterPortInImageActionServer:
         self._lock = RLock()
         self._image_topic = ""
         self._image_subscriber = None
+        self._usb_card_detections_subscriber = None
         self._latest_detection: Optional[PortDetection] = None
         self._latest_pose_servo_status: Optional[PoseServoStatus] = None
 
         self._subscribe_image_topic(self._default_image_topic)
+        self._subscribe_usb_card_detections()
         self._pose_servo_status_subscriber = rospy.Subscriber(
             self._pose_servo_status_topic,
             PoseServoStatus,
@@ -134,9 +147,12 @@ class CenterPortInImageActionServer:
         rospy.on_shutdown(self._handle_shutdown)
         self._server.start()
         rospy.loginfo(
-            "[usb_c_insertion] event=center_port_in_image_action_ready action=%s image_topic=%s image_rotation_deg=%.1f image_to_tool_rotation_deg=%.1f image_error_to_tool_x_sign=%.1f image_error_to_tool_y_sign=%.1f",
+            "[usb_c_insertion] event=center_port_in_image_action_ready action=%s image_topic=%s detection_source=%s usb_card_detections_topic=%s target_card_index=%d image_rotation_deg=%.1f image_to_tool_rotation_deg=%.1f image_error_to_tool_x_sign=%.1f image_error_to_tool_y_sign=%.1f",
             self._action_name,
             self._image_topic,
+            self._detection_source,
+            self._usb_card_detections_topic,
+            self._usb_card_selector.target_card_index,
             self._image_rotation_deg,
             math.degrees(self._image_to_tool_rotation_rad),
             self._image_error_to_tool_x_sign,
@@ -146,6 +162,7 @@ class CenterPortInImageActionServer:
     def _execute(self, goal) -> None:
         image_topic = str(goal.image_topic).strip() or self._default_image_topic
         self._subscribe_image_topic(image_topic)
+        self._subscribe_usb_card_detections()
 
         timeout = self._goal_or_default(goal.timeout, self._default_timeout)
         pixel_tolerance = self._goal_or_default(goal.pixel_tolerance, self._default_pixel_tolerance)
@@ -312,6 +329,8 @@ class CenterPortInImageActionServer:
             self._image_subscriber = rospy.Subscriber(topic, Image, self._image_callback, queue_size=1)
 
     def _image_callback(self, msg: Image) -> None:
+        if self._uses_usb_card_detector():
+            return
         try:
             detection = self._detect_green_blob(msg)
         except ValueError as exc:
@@ -322,6 +341,23 @@ class CenterPortInImageActionServer:
                 found=False,
                 message=str(exc),
             )
+        with self._lock:
+            self._latest_detection = detection
+
+    def _usb_card_detections_callback(self, msg: String) -> None:
+        if not self._uses_usb_card_detector():
+            return
+        target = self._usb_card_selector.select_from_json(msg.data)
+        detection = PortDetection(
+            stamp=target.stamp,
+            image_width=target.image_width,
+            image_height=target.image_height,
+            found=target.found,
+            center_x=target.center_x,
+            center_y=target.center_y,
+            area=target.area,
+            message=target.message,
+        )
         with self._lock:
             self._latest_detection = detection
 
@@ -436,9 +472,28 @@ class CenterPortInImageActionServer:
                 image_width=detection.image_width,
                 image_height=detection.image_height,
                 found=False,
-                message="green_blob_too_small",
+                message="%s_too_small" % self._target_label(),
             )
         return detection
+
+    def _subscribe_usb_card_detections(self) -> None:
+        if not self._uses_usb_card_detector() or not self._usb_card_detections_topic:
+            return
+        with self._lock:
+            if self._usb_card_detections_subscriber is not None:
+                return
+            self._usb_card_detections_subscriber = rospy.Subscriber(
+                self._usb_card_detections_topic,
+                String,
+                self._usb_card_detections_callback,
+                queue_size=1,
+            )
+
+    def _uses_usb_card_detector(self) -> bool:
+        return self._detection_source in ("usb_card", "usb_card_detector", "card")
+
+    def _target_label(self) -> str:
+        return "usb_card_target" if self._uses_usb_card_detector() else "green_blob"
 
     def _should_use_coarse_pose_servo(self, pixel_tolerance: float) -> bool:
         coarse_tolerance = max(0.0, float(self._coarse_pose_servo_pixel_tolerance))
