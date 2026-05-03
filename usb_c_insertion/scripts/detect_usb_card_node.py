@@ -271,20 +271,107 @@ class UsbCardDetectorNode:
                 if detection is not None:
                     candidates.append(detection)
 
-        candidates = self._filter_card_group(candidates)
-        card_group = self._build_card_group_estimate(candidates)
-        candidates.sort(key=lambda item: item.score, reverse=True)
-        selected = candidates[: self._max_detections]
+        card_group = self._build_card_group_estimate(mask, candidates)
+        filtered_candidates = self._filter_card_group(candidates)
+        filtered_candidates.sort(key=lambda item: item.score, reverse=True)
+        selected = filtered_candidates[: self._max_detections]
         return self._sort_detections_for_indexing(selected), card_group
 
-    def _build_card_group_estimate(self, detections: List[CardDetection]) -> Optional[CardGroupEstimate]:
-        if not detections:
-            return None
+    def _build_card_group_estimate(
+        self,
+        mask: np.ndarray,
+        detections: List[CardDetection],
+    ) -> Optional[CardGroupEstimate]:
+        component_boxes = self._card_group_component_boxes(mask)
+        if component_boxes:
+            return self._build_card_group_from_boxes(component_boxes, len(detections))
         points = []
         for detection in detections:
             points.extend(detection.box_points)
         if not points:
             return None
+        boxes = []
+        for detection in detections:
+            xs = [float(point[0]) for point in detection.box_points]
+            ys = [float(point[1]) for point in detection.box_points]
+            boxes.append((min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys), detection.area))
+        return self._build_card_group_from_boxes(boxes, len(detections))
+
+    def _card_group_component_boxes(self, mask: np.ndarray) -> List[Tuple[float, float, float, float, float]]:
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        boxes = []
+        min_area = max(300.0, 0.25 * float(self._min_card_area))
+        for contour in contours:
+            area = float(cv2.contourArea(contour))
+            if area < min_area:
+                continue
+            x, y, width, height = cv2.boundingRect(contour)
+            if width <= 1 or height <= 1:
+                continue
+            long_side = max(float(width), float(height))
+            short_side = min(float(width), float(height))
+            aspect_ratio = long_side / max(1.0, short_side)
+            if aspect_ratio < 1.5:
+                continue
+            if float(height) < 1.25 * float(width):
+                continue
+            boxes.append((float(x), float(y), float(width), float(height), area))
+        return self._best_card_group_boxes(boxes)
+
+    def _best_card_group_boxes(
+        self,
+        boxes: List[Tuple[float, float, float, float, float]],
+    ) -> List[Tuple[float, float, float, float, float]]:
+        if not boxes:
+            return []
+        groups: List[List[Tuple[float, float, float, float, float]]] = []
+        current_group: List[Tuple[float, float, float, float, float]] = []
+        for box in sorted(boxes, key=lambda item: item[0] + 0.5 * item[2]):
+            if not current_group:
+                current_group = [box]
+                continue
+            if self._mask_group_boxes_are_neighbors(current_group[-1], box):
+                current_group.append(box)
+                continue
+            groups.append(current_group)
+            current_group = [box]
+        if current_group:
+            groups.append(current_group)
+        groups.sort(
+            key=lambda group: (
+                len(group),
+                sum(item[4] for item in group),
+                self._box_group_axis_span(group),
+            ),
+            reverse=True,
+        )
+        return groups[0]
+
+    def _mask_group_boxes_are_neighbors(
+        self,
+        first: Tuple[float, float, float, float, float],
+        second: Tuple[float, float, float, float, float],
+    ) -> bool:
+        first_center_y = first[1] + 0.5 * first[3]
+        second_center_y = second[1] + 0.5 * second[3]
+        if abs(first_center_y - second_center_y) > max(0.0, self._group_max_center_y_delta_px):
+            return False
+        first_right = first[0] + first[2]
+        second_left = second[0]
+        edge_gap = second_left - first_right
+        max_edge_gap = max(10.0, 0.25 * max(first[3], second[3]), self._group_max_center_x_gap_px * 0.25)
+        return edge_gap <= max_edge_gap
+
+    def _build_card_group_from_boxes(
+        self,
+        boxes: List[Tuple[float, float, float, float, float]],
+        detection_count: int,
+    ) -> Optional[CardGroupEstimate]:
+        if not boxes:
+            return None
+        points = []
+        for x, y, width, height, _area in boxes:
+            points.extend(((x, y), (x + width, y), (x, y + height), (x + width, y + height)))
         xs = [float(point[0]) for point in points]
         ys = [float(point[1]) for point in points]
         min_x = max(0.0, min(xs))
@@ -296,9 +383,22 @@ class UsbCardDetectorNode:
         center_x = min_x + 0.5 * width
         center_y = min_y + 0.5 * height
         expected_count = int(self._expected_card_count)
-        slot_count = expected_count if expected_count > 0 else len(detections)
-        complete = expected_count <= 0 or len(detections) >= expected_count
+        slot_count = expected_count if expected_count > 0 else max(1, detection_count)
         order_axis = self._slot_order_axis()
+        axis_length = height if order_axis == "y" else width
+        component_axis_widths = [box[3] if order_axis == "y" else box[2] for box in boxes]
+        median_axis_width = self._median_positive(component_axis_widths)
+        estimated_visible_slots = detection_count
+        if median_axis_width > 1e-6:
+            estimated_visible_slots = max(detection_count, int(round(axis_length / median_axis_width)))
+        complete = True
+        if expected_count > 0:
+            if median_axis_width <= 1e-6:
+                complete = detection_count >= expected_count
+            else:
+                expected_span = float(expected_count) * median_axis_width
+                complete = detection_count >= expected_count or axis_length >= 0.90 * expected_span
+            estimated_visible_slots = min(expected_count, estimated_visible_slots)
         reverse = self._card_order_direction in ("descending", "desc", "reverse")
         slot_centers = []
         for index in range(slot_count):
@@ -309,7 +409,7 @@ class UsbCardDetectorNode:
             else:
                 slot_centers.append((min_x + fraction * width, center_y))
         return CardGroupEstimate(
-            observed_count=len(detections),
+            observed_count=estimated_visible_slots,
             expected_count=expected_count,
             complete=complete,
             bbox=(int(round(min_x)), int(round(min_y)), int(round(width)), int(round(height))),
@@ -321,6 +421,22 @@ class UsbCardDetectorNode:
             order_direction=self._card_order_direction,
             slot_centers=tuple(slot_centers),
         )
+
+    @staticmethod
+    def _box_group_axis_span(boxes: List[Tuple[float, float, float, float, float]]) -> float:
+        min_x = min(box[0] for box in boxes)
+        max_x = max(box[0] + box[2] for box in boxes)
+        return max_x - min_x
+
+    @staticmethod
+    def _median_positive(values: List[float]) -> float:
+        positives = sorted(float(value) for value in values if float(value) > 1e-6)
+        if not positives:
+            return 0.0
+        middle = len(positives) // 2
+        if len(positives) % 2:
+            return positives[middle]
+        return 0.5 * (positives[middle - 1] + positives[middle])
 
     def _slot_order_axis(self) -> str:
         if self._card_order_axis == "y":

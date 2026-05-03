@@ -1,0 +1,18 @@
+<launch>
+  <arg name="output_path" default="/tmp/usb_c_insertion_port_calibration_samples.jsonl" />
+  <arg name="target_card_index" default="1" />
+
+  <include file="$(find usb_c_insertion)/launch/clear_legacy_params.launch" />
+
+  <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
+  <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
+  <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+
+  <param name="/calibration/output_path" value="$(arg output_path)" />
+  <param name="/workflow/target_card_index" value="$(arg target_card_index)" />
+
+  <node pkg="usb_c_insertion"
+        type="port_calibration_gui.py"
+        name="usb_c_insertion_port_calibration_gui"
+        output="screen" clear_params="true" />
+</launch>

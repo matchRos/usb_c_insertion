@@ -93,8 +93,8 @@ looming:
   image_topic: "/zedm/zed_node/left/image_rect_color"
   detection_source: "usb_card"
   usb_card_detections_topic: "/usb_c_insertion/usb_card_detector/detections"
-  usb_card_target_point: "card_center"
-  usb_card_require_connector: false
+  usb_card_target_point: "connector"
+  usb_card_require_connector: true
   travel_distance: 0.025
   travel_speed: 0.006
   timeout: 8.0
@@ -299,7 +299,7 @@ photo_pose:
   frame_id: "base_link"
   x: 0.50
   y: 0.10
-  z: 0.15
+  z: 0.10
   qx: 0.708
   qy: 0.0
   qz: 0.0
@@ -423,3 +423,13 @@ workflow:
   looming_recenter_min_shift_px: 2.0
   looming_recenter_max_attempts: 1
   looming_recenter_required: false
+
+calibration:
+  updated_port_pose_topic: "/usb_c_insertion/updated_port_pose"
+  output_path: "/tmp/usb_c_insertion_port_calibration_samples.jsonl"
+  move_action_name: "move_to_pose_accurate"
+  move_timeout: 90.0
+  move_settle_time: 0.35
+  jog_linear_speed: 0.0015
+  jog_angular_speed: 0.015
+  jog_rate_hz: 30.0

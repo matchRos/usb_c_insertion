@@ -21,6 +21,7 @@
   <group ns="/usb_card_detector" clear_params="true" />
   <group ns="/precontact" clear_params="true" />
   <group ns="/workflow" clear_params="true" />
+  <group ns="/calibration" clear_params="true" />
 
   <group ns="/probe" clear_params="true" />
   <group ns="/search" clear_params="true" />

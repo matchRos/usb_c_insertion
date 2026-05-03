@@ -179,6 +179,7 @@ include_directories(
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
 catkin_install_python(PROGRAMS
+  scripts/analyze_port_calibration.py
   scripts/align_housing_yaw_action_server.py
   scripts/camera_pose_publisher.py
   scripts/center_port_in_image_action_server.py
@@ -192,6 +193,7 @@ catkin_install_python(PROGRAMS
   scripts/move_to_pose_action_server.py
   scripts/micro_move_action_server.py
   scripts/param_utils.py
+  scripts/port_calibration_gui.py
   scripts/preinsert_alignment_workflow.py
   scripts/preinsert_workflow_helpers.py
   scripts/pose_servo_node.py

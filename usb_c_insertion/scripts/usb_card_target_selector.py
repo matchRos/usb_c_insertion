@@ -165,7 +165,7 @@ class UsbCardTargetSelector:
         expected_count = self.expected_card_count or group_expected_count
         complete = bool(card_group.get("complete", False))
         if self.estimated_slot_requires_complete and expected_count > 0:
-            if observed_count < expected_count or not complete:
+            if observed_count < expected_count and not complete:
                 return self._not_found(
                     "usb_card_group_incomplete:%d/%d" % (observed_count, expected_count),
                     stamp,
