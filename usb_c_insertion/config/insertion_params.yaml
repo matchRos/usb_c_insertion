@@ -19,7 +19,7 @@ motion:
   action_pipeline_wait_timeout: 2.0
   enforce_workspace_limits: true
   min_target_x: 0.0
-  min_target_z: 0.0
+  min_target_z: -0.10
   stop_repeat_count: 3
   command_rate: 500.0
 
@@ -78,7 +78,7 @@ center_port:
   coarse_pose_servo_position_tolerance: 0.002
   coarse_pose_servo_max_iterations: 3
   max_image_age: 0.5
-  max_lost_time: 1.0
+  max_lost_time: 2.5
   min_blob_area: 120.0
   image_rotation_deg: 180.0
   image_to_tool_rotation_deg: -90.0
@@ -297,7 +297,7 @@ photo_pose:
   frame_id: "base_link"
   x: 0.50
   y: 0.10
-  z: 0.20
+  z: 0.15
   qx: 0.708
   qy: 0.0
   qz: 0.0
@@ -332,15 +332,15 @@ usb_card_detector:
   debug_rate_hz: 5.0
   log_rate_hz: 1.0
   image_rotation_deg: 180.0
-  card_min_value: 125
-  card_max_saturation: 85
-  card_min_channel_value: 80
-  card_max_channel_delta: 95
+  card_min_value: 180
+  card_max_saturation: 70
+  card_min_channel_value: 160
+  card_max_channel_delta: 60
   mask_overlay_alpha: 0.12
   morph_kernel_size: 5
   morph_open_iterations: 1
   morph_close_iterations: 0
-  min_card_area: 2500.0
+  min_card_area: 1800.0
   max_card_area: 250000.0
   min_card_aspect_ratio: 2.0
   max_card_aspect_ratio: 8.0
@@ -350,18 +350,20 @@ usb_card_detector:
   max_vertical_error_deg: 20.0
   max_detections: 4
   card_order_axis: "x"
-  card_order_direction: "descending"
+  card_order_direction: "ascending"
   require_card_group: true
   min_cards_in_group: 2
+  fallback_single_card_with_connector: true
+  fallback_single_card_when_no_group: true
   group_max_center_y_delta_px: 45.0
   group_max_center_x_gap_px: 120.0
   group_max_center_x_gap_ratio: 0.55
   group_max_long_side_delta_ratio: 0.35
   group_max_short_side_delta_ratio: 0.45
   group_max_vertical_error_delta_deg: 10.0
-  split_enabled: true
+  split_enabled: false
   split_min_gap_px: 3
-  split_gap_fill_ratio: 0.60
+  split_gap_fill_ratio: 0.80
   split_min_child_area_ratio: 0.18
   split_max_depth: 4
   connector_max_value: 150
@@ -387,14 +389,18 @@ workflow:
   target_card_index: 1
   usb_card_target_point: "connector"
   usb_card_require_connector: true
+  usb_card_overview_center_before_yaw_enabled: true
+  usb_card_overview_center_target_point: "card_center"
+  usb_card_overview_center_require_connector: false
   usb_card_coarse_camera_move_enabled: true
   usb_card_refine_yaw_after_coarse_move: true
   usb_card_coarse_target_point: "card_center"
   usb_card_coarse_require_connector: false
+  usb_card_coarse_min_tool_z: -0.10
   usb_card_final_target_point: "connector"
   usb_card_final_require_connector: true
   usb_card_order_axis: "x"
-  usb_card_order_direction: "descending"
+  usb_card_order_direction: "ascending"
   run_vision_timeout: 180.0
   vision_result_wait_timeout: 5.0
   move_action_name: "move_to_pose"

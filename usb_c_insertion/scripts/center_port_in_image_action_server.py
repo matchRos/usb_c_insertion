@@ -161,6 +161,7 @@ class CenterPortInImageActionServer:
 
     def _execute(self, goal) -> None:
         image_topic = str(goal.image_topic).strip() or self._default_image_topic
+        self._refresh_usb_card_selector()
         self._subscribe_image_topic(image_topic)
         self._subscribe_usb_card_detections()
 
@@ -308,9 +309,9 @@ class CenterPortInImageActionServer:
             self._robot.send_zero_twist()
             centered_since = None
             if last_seen != rospy.Time(0) and (now - last_seen).to_sec() > self._max_lost_time:
-                self._abort("green_marker_lost", detection, started_at)
+                self._abort("%s_lost" % self._target_label(), detection, started_at)
                 return
-            self._publish_feedback("marker_not_found", started_at, detection, 0.0, 0.0)
+            self._publish_feedback("%s_not_found" % self._target_label(), started_at, detection, 0.0, 0.0)
             rate.sleep()
 
         self._abort("shutdown", latest_feedback_detection, started_at)
@@ -348,6 +349,10 @@ class CenterPortInImageActionServer:
         if not self._uses_usb_card_detector():
             return
         target = self._usb_card_selector.select_from_json(msg.data)
+        image_center_x = 0.5 * float(max(0, target.image_width - 1))
+        image_center_y = 0.5 * float(max(0, target.image_height - 1))
+        error_x = float(target.center_x) - image_center_x if target.found else 0.0
+        error_y = float(target.center_y) - image_center_y if target.found else 0.0
         detection = PortDetection(
             stamp=target.stamp,
             image_width=target.image_width,
@@ -356,6 +361,9 @@ class CenterPortInImageActionServer:
             center_x=target.center_x,
             center_y=target.center_y,
             area=target.area,
+            error_x=error_x,
+            error_y=error_y,
+            error_norm=math.sqrt(error_x * error_x + error_y * error_y),
             message=target.message,
         )
         with self._lock:
@@ -488,6 +496,32 @@ class CenterPortInImageActionServer:
                 self._usb_card_detections_callback,
                 queue_size=1,
             )
+
+    def _refresh_usb_card_selector(self) -> None:
+        if not self._uses_usb_card_detector():
+            return
+        next_selector = UsbCardTargetSelector.from_ros_params("center_port")
+        previous_selector = self._usb_card_selector
+        changed = (
+            previous_selector.target_card_index != next_selector.target_card_index
+            or previous_selector.target_point != next_selector.target_point
+            or previous_selector.require_connector != next_selector.require_connector
+            or previous_selector.order_axis != next_selector.order_axis
+            or previous_selector.order_direction != next_selector.order_direction
+        )
+        if not changed:
+            return
+        with self._lock:
+            self._usb_card_selector = next_selector
+            self._latest_detection = None
+        rospy.loginfo(
+            "[usb_c_insertion] event=center_port_usb_card_selector_updated target_card_index=%d target_point=%s require_connector=%s order_axis=%s order_direction=%s",
+            next_selector.target_card_index,
+            next_selector.target_point,
+            str(next_selector.require_connector).lower(),
+            next_selector.order_axis,
+            next_selector.order_direction,
+        )
 
     def _uses_usb_card_detector(self) -> bool:
         return self._detection_source in ("usb_card", "usb_card_detector", "card")

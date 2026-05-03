@@ -75,11 +75,29 @@ class PreinsertAlignmentWorkflow:
             "02 Camera at initial estimate",
         )
 
+        if (
+            self._helpers.uses_usb_card_overview_vision()
+            and self._helpers.usb_card_overview_center_before_yaw_enabled()
+        ):
+            if self._helpers.center_port_in_image(
+                usb_card_target_point=self._helpers.usb_card_overview_center_target_point(),
+                usb_card_require_connector=self._helpers.usb_card_overview_center_require_connector(),
+                label="overview_card_centering",
+            ) is None:
+                return False
+            self._snapshots.capture_marker_alignment(
+                "03_centered_on_usb_card_overview.png",
+                "03 Centered on USB card overview",
+                fallback_marker_center=PresentationSnapshotRecorder.center_from_center_result(
+                    self._helpers.latest_center_port_result()
+                ),
+            )
+
         if not self._helpers.align_housing_yaw():
             return False
         self._snapshots.capture_marker_alignment(
-            "03_after_yaw_alignment_before_centering.png",
-            "03 After yaw alignment",
+            "04_after_yaw_alignment_before_centering.png",
+            "04 After yaw alignment",
         )
 
         if (
@@ -105,23 +123,23 @@ class PreinsertAlignmentWorkflow:
             if self._helpers.move_to_pose(camera_pose, "camera_to_usb_card_coarse", accurate=True) is None:
                 return False
             self._snapshots.capture_current_view(
-                "04_camera_at_usb_card_coarse.png",
-                "04 Camera at USB card coarse estimate",
+                "05_camera_at_usb_card_coarse.png",
+                "05 Camera at USB card coarse estimate",
             )
 
             if self._helpers.usb_card_refine_yaw_after_coarse_move():
                 if not self._helpers.align_housing_yaw():
                     return False
                 self._snapshots.capture_marker_alignment(
-                    "05_after_usb_card_refine_yaw.png",
-                    "05 After USB card refine yaw",
+                    "06_after_usb_card_refine_yaw.png",
+                    "06 After USB card refine yaw",
                 )
 
         if self._helpers.center_port_in_image() is None:
             return False
         self._snapshots.capture_marker_alignment(
-            "06_centered_over_port.png",
-            "06 Camera over port center",
+            "07_centered_over_port.png",
+            "07 Camera over port center",
             fallback_marker_center=PresentationSnapshotRecorder.center_from_center_result(
                 self._helpers.latest_center_port_result()
             ),
@@ -147,8 +165,8 @@ class PreinsertAlignmentWorkflow:
         if marker_center is None:
             marker_center = PresentationSnapshotRecorder.center_from_looming_result(looming_result)
         self._snapshots.capture_marker_alignment(
-            "07_after_verify_looming.png",
-            "07 After looming verification",
+            "08_after_verify_looming.png",
+            "08 After looming verification",
             fallback_marker_center=marker_center,
         )
 

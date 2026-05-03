@@ -49,7 +49,7 @@ class CardDetection:
 
 class UsbCardDetectorNode:
     """
-    Detect silver rectangular USB-C cards on a black case.
+    Detect bright rectangular USB-C cards on a black case.
 
     This node is intentionally standalone: it publishes image-space detections
     and an annotated debug image, but it does not feed the robot workflow yet.
@@ -115,6 +115,14 @@ class UsbCardDetectorNode:
         self._card_order_direction = self._str_param("~usb_card_detector/card_order_direction", "ascending").lower()
         self._require_card_group = self._bool_param("~usb_card_detector/require_card_group", True)
         self._min_cards_in_group = max(1, self._int_param("~usb_card_detector/min_cards_in_group", 2))
+        self._fallback_single_card_with_connector = self._bool_param(
+            "~usb_card_detector/fallback_single_card_with_connector",
+            True,
+        )
+        self._fallback_single_card_when_no_group = self._bool_param(
+            "~usb_card_detector/fallback_single_card_when_no_group",
+            True,
+        )
         self._group_max_center_y_delta_px = self._float_param("~usb_card_detector/group_max_center_y_delta_px", 45.0)
         self._group_max_center_x_gap_px = self._float_param("~usb_card_detector/group_max_center_x_gap_px", 120.0)
         self._group_max_center_x_gap_ratio = self._float_param("~usb_card_detector/group_max_center_x_gap_ratio", 0.55)
@@ -252,7 +260,7 @@ class UsbCardDetectorNode:
         if self._min_cards_in_group <= 1:
             return candidates
         if len(candidates) < self._min_cards_in_group:
-            return []
+            return self._single_card_connector_fallback(candidates)
 
         groups: List[List[CardDetection]] = []
         current_group: List[CardDetection] = []
@@ -270,7 +278,7 @@ class UsbCardDetectorNode:
 
         groups = [group for group in groups if len(group) >= self._min_cards_in_group]
         if not groups:
-            return []
+            return self._single_card_connector_fallback(candidates)
         groups.sort(
             key=lambda group: (
                 len(group),
@@ -280,6 +288,17 @@ class UsbCardDetectorNode:
             reverse=True,
         )
         return groups[0]
+
+    def _single_card_connector_fallback(self, candidates: List[CardDetection]) -> List[CardDetection]:
+        if self._fallback_single_card_when_no_group and len(candidates) == 1:
+            return [candidates[0]]
+        if not self._fallback_single_card_with_connector:
+            return []
+        connector_candidates = [candidate for candidate in candidates if candidate.connector is not None]
+        if not connector_candidates:
+            return []
+        connector_candidates.sort(key=lambda item: item.score, reverse=True)
+        return [connector_candidates[0]]
 
     def _cards_are_group_neighbors(self, first: CardDetection, second: CardDetection) -> bool:
         center_y_delta = abs(float(first.center_y) - float(second.center_y))

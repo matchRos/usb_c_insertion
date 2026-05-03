@@ -57,6 +57,17 @@ class PreinsertWorkflowHelpers:
         self._vision_service_name = "run_vision"
         self._overview_vision_mode = str(get_param("~workflow/overview_vision_mode", "legacy")).strip().lower()
         self._target_card_index = int(get_param("~workflow/target_card_index", 1))
+        self._usb_card_overview_center_before_yaw_enabled = self._optional_bool_param(
+            "~workflow/usb_card_overview_center_before_yaw_enabled",
+            True,
+        )
+        self._usb_card_overview_center_target_point = str(
+            get_param("~workflow/usb_card_overview_center_target_point", "card_center")
+        ).strip().lower()
+        self._usb_card_overview_center_require_connector = self._optional_bool_param(
+            "~workflow/usb_card_overview_center_require_connector",
+            False,
+        )
         self._usb_card_coarse_camera_move_enabled = self._optional_bool_param(
             "~workflow/usb_card_coarse_camera_move_enabled",
             True,
@@ -71,6 +82,9 @@ class PreinsertWorkflowHelpers:
         self._usb_card_coarse_require_connector = self._optional_bool_param(
             "~workflow/usb_card_coarse_require_connector",
             False,
+        )
+        self._usb_card_coarse_min_tool_z = float(
+            get_param("~workflow/usb_card_coarse_min_tool_z", get_param("~motion/min_target_z", 0.0))
         )
         self._usb_card_final_target_point = str(
             get_param("~workflow/usb_card_final_target_point", "connector")
@@ -223,6 +237,15 @@ class PreinsertWorkflowHelpers:
     def target_card_index(self) -> int:
         return self._target_card_index
 
+    def usb_card_overview_center_before_yaw_enabled(self) -> bool:
+        return self._usb_card_overview_center_before_yaw_enabled
+
+    def usb_card_overview_center_target_point(self) -> str:
+        return self._usb_card_overview_center_target_point
+
+    def usb_card_overview_center_require_connector(self) -> bool:
+        return self._usb_card_overview_center_require_connector
+
     def usb_card_coarse_camera_move_enabled(self) -> bool:
         return self._usb_card_coarse_camera_move_enabled
 
@@ -234,6 +257,9 @@ class PreinsertWorkflowHelpers:
 
     def usb_card_coarse_require_connector(self) -> bool:
         return self._usb_card_coarse_require_connector
+
+    def usb_card_coarse_min_tool_z(self) -> float:
+        return self._usb_card_coarse_min_tool_z
 
     def usb_card_final_target_point(self) -> str:
         return self._usb_card_final_target_point
@@ -361,6 +387,7 @@ class PreinsertWorkflowHelpers:
             )
             return None
 
+        target_tool_xyz = self._clamp_usb_card_coarse_tool_z(target_tool_xyz, label)
         target_pose = PoseStamped()
         target_pose.header.stamp = rospy.Time.now()
         target_pose.header.frame_id = self.base_frame
@@ -435,6 +462,18 @@ class PreinsertWorkflowHelpers:
         )
         return target_pose
 
+    def _clamp_usb_card_coarse_tool_z(self, target_tool_xyz, label: str):
+        min_z = float(self._usb_card_coarse_min_tool_z)
+        if target_tool_xyz[2] >= min_z:
+            return target_tool_xyz
+        rospy.logwarn(
+            "[usb_c_insertion] event=preinsert_usb_card_coarse_z_clamped label=%s requested_z=%.4f clamped_z=%.4f",
+            label,
+            target_tool_xyz[2],
+            min_z,
+        )
+        return target_tool_xyz[0], target_tool_xyz[1], min_z
+
     def align_housing_yaw(self) -> bool:
         goal = AlignHousingYawGoal()
         goal.image_topic = self._required_str_param("~align_housing_yaw/image_topic")
@@ -481,42 +520,91 @@ class PreinsertWorkflowHelpers:
         )
         return True
 
-    def center_port_in_image(self) -> Optional[PoseStamped]:
-        goal = CenterPortInImageGoal()
-        goal.image_topic = self._required_str_param("~center_port/image_topic")
-        goal.timeout = self._required_float_param("~center_port/timeout")
-        goal.pixel_tolerance = self._required_float_param("~center_port/pixel_tolerance")
-        goal.stable_time = self._required_float_param("~center_port/stable_time")
-        goal.max_velocity = self._required_float_param("~center_port/max_velocity")
-        goal.gain = self._required_float_param("~center_port/gain")
-        goal.min_blob_area = self._required_float_param("~center_port/min_blob_area")
-        self._center_client.send_goal(goal)
-        finished = self._center_client.wait_for_result(rospy.Duration.from_sec(max(1.0, goal.timeout + 5.0)))
-        if not finished:
-            self._center_client.cancel_goal()
-            rospy.logerr("[usb_c_insertion] event=preinsert_workflow_failed reason=center_port_timeout")
-            return None
-        result = self._center_client.get_result()
-        self._last_center_port_result = result
-        if result is None or not bool(result.success):
-            message = result.message if result is not None else "no_result"
-            error_code = result.error_code if result is not None else "center_no_result"
-            rospy.logerr(
-                "[usb_c_insertion] event=preinsert_workflow_failed reason=center_port_failed error_code=%s message=%s",
-                error_code,
-                message,
-            )
-            return None
-        rospy.loginfo(
-            "[usb_c_insertion] event=preinsert_center_port_complete error_norm=%.2f blob=(%.1f,%.1f)",
-            result.error_norm,
-            result.blob_center_x,
-            result.blob_center_y,
+    def center_port_in_image(
+        self,
+        usb_card_target_point: Optional[str] = None,
+        usb_card_require_connector: Optional[bool] = None,
+        label: str = "center_port",
+    ) -> Optional[PoseStamped]:
+        previous_target = self._temporary_center_port_usb_card_target(
+            usb_card_target_point,
+            usb_card_require_connector,
         )
-        return result.final_pose
+        try:
+            goal = CenterPortInImageGoal()
+            goal.image_topic = self._required_str_param("~center_port/image_topic")
+            goal.timeout = self._required_float_param("~center_port/timeout")
+            goal.pixel_tolerance = self._required_float_param("~center_port/pixel_tolerance")
+            goal.stable_time = self._required_float_param("~center_port/stable_time")
+            goal.max_velocity = self._required_float_param("~center_port/max_velocity")
+            goal.gain = self._required_float_param("~center_port/gain")
+            goal.min_blob_area = self._required_float_param("~center_port/min_blob_area")
+            self._center_client.send_goal(goal)
+            finished = self._center_client.wait_for_result(rospy.Duration.from_sec(max(1.0, goal.timeout + 5.0)))
+            if not finished:
+                self._center_client.cancel_goal()
+                rospy.logerr(
+                    "[usb_c_insertion] event=preinsert_workflow_failed reason=center_port_timeout label=%s",
+                    label,
+                )
+                return None
+            result = self._center_client.get_result()
+            self._last_center_port_result = result
+            if result is None or not bool(result.success):
+                message = result.message if result is not None else "no_result"
+                error_code = result.error_code if result is not None else "center_no_result"
+                rospy.logerr(
+                    "[usb_c_insertion] event=preinsert_workflow_failed reason=center_port_failed label=%s error_code=%s message=%s",
+                    label,
+                    error_code,
+                    message,
+                )
+                return None
+            if not self._validate_center_result_consistency(result, label, goal.pixel_tolerance):
+                return None
+            rospy.loginfo(
+                "[usb_c_insertion] event=preinsert_center_port_complete label=%s target_point=%s require_connector=%s error_norm=%.2f blob=(%.1f,%.1f)",
+                label,
+                str(usb_card_target_point or "configured"),
+                str(usb_card_require_connector if usb_card_require_connector is not None else "configured").lower(),
+                result.error_norm,
+                result.blob_center_x,
+                result.blob_center_y,
+            )
+            return result.final_pose
+        finally:
+            self._restore_center_port_usb_card_target(previous_target)
 
     def latest_center_port_result(self):
         return self._last_center_port_result
+
+    @staticmethod
+    def _validate_center_result_consistency(result, label: str, pixel_tolerance: float) -> bool:
+        image_width = int(getattr(result, "image_width", 0) or 0)
+        image_height = int(getattr(result, "image_height", 0) or 0)
+        if image_width <= 0 or image_height <= 0:
+            return True
+        image_center_x = 0.5 * float(image_width - 1)
+        image_center_y = 0.5 * float(image_height - 1)
+        error_x = float(result.blob_center_x) - image_center_x
+        error_y = float(result.blob_center_y) - image_center_y
+        recomputed_error = math.sqrt(error_x * error_x + error_y * error_y)
+        reported_error = float(getattr(result, "error_norm", 0.0) or 0.0)
+        if reported_error <= max(0.0, float(pixel_tolerance)) and recomputed_error > max(5.0, float(pixel_tolerance)):
+            rospy.logerr(
+                "[usb_c_insertion] event=preinsert_workflow_failed reason=center_port_inconsistent_result label=%s reported_error_norm=%.2f recomputed_error_norm=%.2f blob=(%.1f,%.1f) image_center=(%.1f,%.1f) image_size=(%d,%d) hint=restart_center_port_action_server",
+                label,
+                reported_error,
+                recomputed_error,
+                result.blob_center_x,
+                result.blob_center_y,
+                image_center_x,
+                image_center_y,
+                image_width,
+                image_height,
+            )
+            return False
+        return True
 
     def estimate_housing_plane(
         self,
@@ -790,6 +878,43 @@ class PreinsertWorkflowHelpers:
 
     @staticmethod
     def _restore_housing_plane_usb_card_target(previous) -> None:
+        if previous is None:
+            return
+        for name, (existed, value) in previous.items():
+            if existed:
+                rospy.set_param(name, value)
+            elif rospy.has_param(name):
+                rospy.delete_param(name)
+
+    def _temporary_center_port_usb_card_target(
+        self,
+        target_point: Optional[str],
+        require_connector: Optional[bool],
+    ):
+        if target_point is None and require_connector is None:
+            return None
+        target_param = "/center_port/usb_card_target_point"
+        require_param = "/center_port/usb_card_require_connector"
+        previous = {
+            target_param: (rospy.has_param(target_param), rospy.get_param(target_param) if rospy.has_param(target_param) else None),
+            require_param: (
+                rospy.has_param(require_param),
+                rospy.get_param(require_param) if rospy.has_param(require_param) else None,
+            ),
+        }
+        if target_point is not None:
+            rospy.set_param(target_param, str(target_point).strip().lower())
+        if require_connector is not None:
+            rospy.set_param(require_param, bool(require_connector))
+        rospy.loginfo(
+            "[usb_c_insertion] event=preinsert_center_port_target_override target_point=%s require_connector=%s",
+            str(target_point if target_point is not None else previous[target_param][1]),
+            str(require_connector if require_connector is not None else previous[require_param][1]).lower(),
+        )
+        return previous
+
+    @staticmethod
+    def _restore_center_port_usb_card_target(previous) -> None:
         if previous is None:
             return
         for name, (existed, value) in previous.items():
