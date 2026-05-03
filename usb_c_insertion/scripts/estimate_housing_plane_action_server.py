@@ -405,6 +405,9 @@ class EstimateHousingPlaneActionServer:
             or previous_selector.require_connector != next_selector.require_connector
             or previous_selector.order_axis != next_selector.order_axis
             or previous_selector.order_direction != next_selector.order_direction
+            or previous_selector.expected_card_count != next_selector.expected_card_count
+            or previous_selector.estimated_slot_requires_complete
+            != next_selector.estimated_slot_requires_complete
         )
         if not changed:
             return
@@ -412,12 +415,14 @@ class EstimateHousingPlaneActionServer:
             self._usb_card_selector = next_selector
             self._latest_detection = None
         rospy.loginfo(
-            "[usb_c_insertion] event=estimate_housing_plane_usb_card_selector_updated target_card_index=%d target_point=%s require_connector=%s order_axis=%s order_direction=%s",
+            "[usb_c_insertion] event=estimate_housing_plane_usb_card_selector_updated target_card_index=%d target_point=%s require_connector=%s order_axis=%s order_direction=%s expected_card_count=%d estimated_slot_requires_complete=%s",
             next_selector.target_card_index,
             next_selector.target_point,
             str(next_selector.require_connector).lower(),
             next_selector.order_axis,
             next_selector.order_direction,
+            next_selector.expected_card_count,
+            str(next_selector.estimated_slot_requires_complete).lower(),
         )
 
     def _uses_usb_card_detector(self) -> bool:

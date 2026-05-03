@@ -36,12 +36,16 @@ class UsbCardTargetSelector:
         require_connector: bool,
         order_axis: str,
         order_direction: str,
+        expected_card_count: int = 0,
+        estimated_slot_requires_complete: bool = True,
     ):
         self.target_card_index = max(1, int(target_card_index))
         self.target_point = str(target_point).strip().lower() or "connector"
         self.require_connector = bool(require_connector)
         self.order_axis = str(order_axis).strip().lower() or "x"
         self.order_direction = str(order_direction).strip().lower() or "ascending"
+        self.expected_card_count = max(0, int(expected_card_count))
+        self.estimated_slot_requires_complete = bool(estimated_slot_requires_complete)
 
     @classmethod
     def from_ros_params(cls, namespace: str):
@@ -60,6 +64,19 @@ class UsbCardTargetSelector:
                     get_param("~workflow/usb_card_order_direction", "ascending"),
                 )
             ),
+            expected_card_count=int(
+                get_param(
+                    prefix + "usb_card_total_count",
+                    get_param(
+                        "~workflow/usb_card_total_count",
+                        get_param("~usb_card_detector/expected_card_count", 0),
+                    ),
+                )
+            ),
+            estimated_slot_requires_complete=cls._bool_param(
+                prefix + "usb_card_estimated_slot_requires_complete",
+                cls._bool_param("~workflow/usb_card_estimated_slot_requires_complete", True),
+            ),
         )
 
     def select_from_json(self, data: str) -> UsbCardTarget:
@@ -76,6 +93,9 @@ class UsbCardTargetSelector:
         cards = payload.get("cards", [])
         if not isinstance(cards, list) or not cards:
             return self._not_found("usb_card_not_found", stamp, image_width, image_height)
+
+        if self._uses_estimated_slot():
+            return self._select_estimated_slot(payload, stamp, image_width, image_height)
 
         ordered_cards = self._ordered_cards(cards)
         selected_index = self.target_card_index - 1
@@ -117,6 +137,84 @@ class UsbCardTargetSelector:
             card_index=self.target_card_index,
             source_card_index=int(card.get("index", selected_index) or 0),
             target_kind="connector" if target is connector else "card_center",
+        )
+
+    def _uses_estimated_slot(self) -> bool:
+        return self.target_point in (
+            "estimated_slot",
+            "slot",
+            "slot_center",
+            "group_slot",
+            "group_fraction",
+            "estimated_card_center",
+        )
+
+    def _select_estimated_slot(
+        self,
+        payload: Dict[str, Any],
+        stamp: rospy.Time,
+        image_width: int,
+        image_height: int,
+    ) -> UsbCardTarget:
+        card_group = payload.get("card_group")
+        if not isinstance(card_group, dict):
+            return self._not_found("usb_card_group_missing", stamp, image_width, image_height)
+
+        observed_count = int(card_group.get("observed_count", 0) or 0)
+        group_expected_count = int(card_group.get("expected_count", 0) or 0)
+        expected_count = self.expected_card_count or group_expected_count
+        complete = bool(card_group.get("complete", False))
+        if self.estimated_slot_requires_complete and expected_count > 0:
+            if observed_count < expected_count or not complete:
+                return self._not_found(
+                    "usb_card_group_incomplete:%d/%d" % (observed_count, expected_count),
+                    stamp,
+                    image_width,
+                    image_height,
+                )
+
+        slot_centers = card_group.get("slot_centers", [])
+        if not isinstance(slot_centers, list) or not slot_centers:
+            return self._not_found("usb_card_group_slots_missing", stamp, image_width, image_height)
+
+        selected_index = self.target_card_index - 1
+        if selected_index < 0 or selected_index >= len(slot_centers):
+            return self._not_found(
+                "usb_card_group_slot_unavailable:%d/%d" % (self.target_card_index, len(slot_centers)),
+                stamp,
+                image_width,
+                image_height,
+            )
+
+        slot = slot_centers[selected_index]
+        if not isinstance(slot, dict):
+            return self._not_found("usb_card_group_slot_invalid", stamp, image_width, image_height)
+        center_x = float(slot.get("center_x", 0.0) or 0.0)
+        center_y = float(slot.get("center_y", 0.0) or 0.0)
+        width = float(card_group.get("width", 0.0) or 0.0)
+        height = float(card_group.get("height", 0.0) or 0.0)
+        slot_count = max(1, len(slot_centers))
+        if card_group.get("order_axis", self.order_axis) == "y":
+            slot_width = width
+            slot_height = height / float(slot_count)
+        else:
+            slot_width = width / float(slot_count)
+            slot_height = height
+        area = max(1.0, slot_width * slot_height)
+        aspect_ratio = max(slot_width, slot_height) / max(1e-6, min(slot_width, slot_height))
+        return UsbCardTarget(
+            stamp=stamp,
+            image_width=image_width,
+            image_height=image_height,
+            found=True,
+            center_x=center_x,
+            center_y=center_y,
+            area=area,
+            aspect_ratio=aspect_ratio,
+            message="usb_card_estimated_slot_found:%d/%d" % (self.target_card_index, slot_count),
+            card_index=self.target_card_index,
+            source_card_index=selected_index,
+            target_kind="estimated_slot",
         )
 
     def _ordered_cards(self, cards: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

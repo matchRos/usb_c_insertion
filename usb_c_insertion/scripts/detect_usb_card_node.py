@@ -47,6 +47,21 @@ class CardDetection:
     connector: Optional[ConnectorDetection]
 
 
+@dataclass(frozen=True)
+class CardGroupEstimate:
+    observed_count: int
+    expected_count: int
+    complete: bool
+    bbox: Tuple[int, int, int, int]
+    center_x: float
+    center_y: float
+    width: float
+    height: float
+    order_axis: str
+    order_direction: str
+    slot_centers: Tuple[Tuple[float, float], ...]
+
+
 class UsbCardDetectorNode:
     """
     Detect bright rectangular USB-C cards on a black case.
@@ -111,6 +126,13 @@ class UsbCardDetectorNode:
         self._require_vertical_cards = self._bool_param("~usb_card_detector/require_vertical_cards", True)
         self._max_vertical_error_deg = self._float_param("~usb_card_detector/max_vertical_error_deg", 20.0)
         self._max_detections = max(1, self._int_param("~usb_card_detector/max_detections", 4))
+        self._expected_card_count = max(
+            0,
+            self._int_param(
+                "~usb_card_detector/expected_card_count",
+                int(get_param("~workflow/usb_card_total_count", 0)),
+            ),
+        )
         self._card_order_axis = self._str_param("~usb_card_detector/card_order_axis", "x").lower()
         self._card_order_direction = self._str_param("~usb_card_detector/card_order_direction", "ascending").lower()
         self._require_card_group = self._bool_param("~usb_card_detector/require_card_group", True)
@@ -193,10 +215,10 @@ class UsbCardDetectorNode:
             raw_bgr = self._image_to_bgr(msg)
             bgr = self._rotate_image_for_processing(raw_bgr)
             mask = self._build_card_mask(bgr)
-            detections = self._detect_cards(bgr, mask)
-            self._publish_detections(msg, bgr, detections)
-            self._publish_debug_outputs(msg, bgr, mask, detections)
-            self._log_detections(detections)
+            detections, card_group = self._detect_cards(bgr, mask)
+            self._publish_detections(msg, bgr, detections, card_group)
+            self._publish_debug_outputs(msg, bgr, mask, detections, card_group)
+            self._log_detections(detections, card_group)
         except Exception as exc:
             rospy.logwarn_throttle(
                 1.0,
@@ -240,7 +262,7 @@ class UsbCardDetectorNode:
                 )
         return mask
 
-    def _detect_cards(self, bgr: np.ndarray, mask: np.ndarray) -> List[CardDetection]:
+    def _detect_cards(self, bgr: np.ndarray, mask: np.ndarray) -> Tuple[List[CardDetection], Optional[CardGroupEstimate]]:
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         candidates: List[CardDetection] = []
         for contour in contours:
@@ -250,9 +272,60 @@ class UsbCardDetectorNode:
                     candidates.append(detection)
 
         candidates = self._filter_card_group(candidates)
+        card_group = self._build_card_group_estimate(candidates)
         candidates.sort(key=lambda item: item.score, reverse=True)
         selected = candidates[: self._max_detections]
-        return self._sort_detections_for_indexing(selected)
+        return self._sort_detections_for_indexing(selected), card_group
+
+    def _build_card_group_estimate(self, detections: List[CardDetection]) -> Optional[CardGroupEstimate]:
+        if not detections:
+            return None
+        points = []
+        for detection in detections:
+            points.extend(detection.box_points)
+        if not points:
+            return None
+        xs = [float(point[0]) for point in points]
+        ys = [float(point[1]) for point in points]
+        min_x = max(0.0, min(xs))
+        max_x = max(min_x + 1.0, max(xs))
+        min_y = max(0.0, min(ys))
+        max_y = max(min_y + 1.0, max(ys))
+        width = max_x - min_x
+        height = max_y - min_y
+        center_x = min_x + 0.5 * width
+        center_y = min_y + 0.5 * height
+        expected_count = int(self._expected_card_count)
+        slot_count = expected_count if expected_count > 0 else len(detections)
+        complete = expected_count <= 0 or len(detections) >= expected_count
+        order_axis = self._slot_order_axis()
+        reverse = self._card_order_direction in ("descending", "desc", "reverse")
+        slot_centers = []
+        for index in range(slot_count):
+            fraction_index = slot_count - index - 1 if reverse else index
+            fraction = (float(fraction_index) + 0.5) / max(1.0, float(slot_count))
+            if order_axis == "y":
+                slot_centers.append((center_x, min_y + fraction * height))
+            else:
+                slot_centers.append((min_x + fraction * width, center_y))
+        return CardGroupEstimate(
+            observed_count=len(detections),
+            expected_count=expected_count,
+            complete=complete,
+            bbox=(int(round(min_x)), int(round(min_y)), int(round(width)), int(round(height))),
+            center_x=center_x,
+            center_y=center_y,
+            width=width,
+            height=height,
+            order_axis=order_axis,
+            order_direction=self._card_order_direction,
+            slot_centers=tuple(slot_centers),
+        )
+
+    def _slot_order_axis(self) -> str:
+        if self._card_order_axis == "y":
+            return "y"
+        return "x"
 
     def _filter_card_group(self, candidates: List[CardDetection]) -> List[CardDetection]:
         if not self._require_card_group:
@@ -588,7 +661,13 @@ class UsbCardDetectorNode:
             angle_deg = 180.0 - angle_deg
         return abs(90.0 - angle_deg)
 
-    def _publish_detections(self, msg: Image, bgr: np.ndarray, detections: List[CardDetection]) -> None:
+    def _publish_detections(
+        self,
+        msg: Image,
+        bgr: np.ndarray,
+        detections: List[CardDetection],
+        card_group: Optional[CardGroupEstimate],
+    ) -> None:
         payload = {
             "stamp": msg.header.stamp.to_sec() if msg.header.stamp else rospy.Time.now().to_sec(),
             "frame_id": msg.header.frame_id,
@@ -596,6 +675,7 @@ class UsbCardDetectorNode:
             "image_height": int(bgr.shape[0]),
             "count": len(detections),
             "cards": [self._card_to_dict(index, detection) for index, detection in enumerate(detections)],
+            "card_group": self._card_group_to_dict(card_group),
         }
         self._detections_publisher.publish(String(data=json.dumps(payload, sort_keys=True)))
 
@@ -605,6 +685,7 @@ class UsbCardDetectorNode:
         bgr: np.ndarray,
         mask: np.ndarray,
         detections: List[CardDetection],
+        card_group: Optional[CardGroupEstimate],
     ) -> None:
         if not self._publish_debug_image and not self._publish_mask and not self._show_gui:
             return
@@ -615,7 +696,7 @@ class UsbCardDetectorNode:
 
         debug = None
         if self._publish_debug_image or self._show_gui:
-            debug = self._draw_debug_image(bgr, mask, detections)
+            debug = self._draw_debug_image(bgr, mask, detections, card_group)
         if self._publish_debug_image and debug is not None:
             self._debug_image_publisher.publish(self._bgr_to_image_msg(debug, msg.header.frame_id))
         if self._show_gui and debug is not None:
@@ -629,6 +710,7 @@ class UsbCardDetectorNode:
         bgr: np.ndarray,
         mask: np.ndarray,
         detections: List[CardDetection],
+        card_group: Optional[CardGroupEstimate],
     ) -> np.ndarray:
         debug = bgr.copy()
         tint = np.zeros_like(debug)
@@ -709,6 +791,39 @@ class UsbCardDetectorNode:
                     (80, 180, 255),
                 )
 
+        if card_group is not None:
+            x, y, width, height = card_group.bbox
+            cv2.rectangle(debug, (x, y), (x + width, y + height), (0, 180, 255), 2, cv2.LINE_AA)
+            for slot_index, (slot_x, slot_y) in enumerate(card_group.slot_centers):
+                center = (int(round(slot_x)), int(round(slot_y)))
+                cv2.drawMarker(
+                    debug,
+                    center,
+                    (0, 180, 255),
+                    markerType=cv2.MARKER_TILTED_CROSS,
+                    markerSize=14,
+                    thickness=1,
+                    line_type=cv2.LINE_AA,
+                )
+                if slot_index < 12:
+                    self._draw_label(
+                        debug,
+                        "s%d" % (slot_index + 1),
+                        (center[0] + 5, center[1] + 18),
+                        (0, 180, 255),
+                    )
+            expected_text = str(card_group.expected_count) if card_group.expected_count > 0 else "auto"
+            self._draw_label(
+                debug,
+                "group %d/%s complete=%s" % (
+                    card_group.observed_count,
+                    expected_text,
+                    str(card_group.complete).lower(),
+                ),
+                (x + 6, max(18, y - 10)),
+                (0, 180, 255),
+            )
+
         status = "USB card detections: %d" % len(detections)
         cv2.rectangle(debug, (8, 8), (300, 36), (0, 0, 0), -1)
         cv2.putText(debug, status, (16, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
@@ -739,7 +854,11 @@ class UsbCardDetectorNode:
             except cv2.error:
                 pass
 
-    def _log_detections(self, detections: List[CardDetection]) -> None:
+    def _log_detections(
+        self,
+        detections: List[CardDetection],
+        card_group: Optional[CardGroupEstimate],
+    ) -> None:
         now = rospy.Time.now()
         if (now - self._last_log).to_sec() < 1.0 / self._log_rate_hz:
             return
@@ -760,9 +879,19 @@ class UsbCardDetectorNode:
                     connector,
                 )
             )
+        group_summary = ""
+        if card_group is not None:
+            expected = str(card_group.expected_count) if card_group.expected_count > 0 else "auto"
+            group_summary = " group_observed=%d group_expected=%s group_complete=%s group_bbox=%s" % (
+                card_group.observed_count,
+                expected,
+                str(card_group.complete).lower(),
+                str(card_group.bbox),
+            )
         rospy.loginfo(
-            "[usb_c_insertion] event=usb_card_detector_result count=%d %s",
+            "[usb_c_insertion] event=usb_card_detector_result count=%d%s %s",
             len(detections),
+            group_summary,
             " ".join(summaries),
         )
 
@@ -790,6 +919,27 @@ class UsbCardDetectorNode:
             "score": round(detection.score, 3),
             "box_points": [list(point) for point in detection.box_points],
             "connector": connector,
+        }
+
+    @staticmethod
+    def _card_group_to_dict(card_group: Optional[CardGroupEstimate]) -> Optional[dict]:
+        if card_group is None:
+            return None
+        return {
+            "observed_count": int(card_group.observed_count),
+            "expected_count": int(card_group.expected_count),
+            "complete": bool(card_group.complete),
+            "bbox": list(card_group.bbox),
+            "center_x": round(card_group.center_x, 3),
+            "center_y": round(card_group.center_y, 3),
+            "width": round(card_group.width, 3),
+            "height": round(card_group.height, 3),
+            "order_axis": card_group.order_axis,
+            "order_direction": card_group.order_direction,
+            "slot_centers": [
+                {"index": index + 1, "center_x": round(center[0], 3), "center_y": round(center[1], 3)}
+                for index, center in enumerate(card_group.slot_centers)
+            ],
         }
 
     def _image_to_bgr(self, msg: Image) -> np.ndarray:

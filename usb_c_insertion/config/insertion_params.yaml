@@ -118,7 +118,7 @@ housing_plane:
   image_topic: "/zedm/zed_node/left/image_rect_color"
   detection_source: "usb_card"
   usb_card_detections_topic: "/usb_c_insertion/usb_card_detector/detections"
-  usb_card_target_point: "card_center"
+  usb_card_target_point: "estimated_slot"
   usb_card_require_connector: false
   cloud_topic: "/zedm/zed_node/point_cloud/cloud_registered"
   base_transform_frame: "usb_c_zedm_left_camera_optical_frame"
@@ -351,6 +351,7 @@ usb_card_detector:
   require_vertical_cards: true
   max_vertical_error_deg: 20.0
   max_detections: 8
+  expected_card_count: 7
   card_order_axis: "x"
   card_order_direction: "ascending"
   require_card_group: true
@@ -389,14 +390,16 @@ precontact:
 workflow:
   overview_vision_mode: "usb_card"
   target_card_index: 1
+  usb_card_total_count: 7
+  usb_card_estimated_slot_requires_complete: true
   usb_card_target_point: "connector"
   usb_card_require_connector: true
   usb_card_overview_center_before_yaw_enabled: false
-  usb_card_overview_center_target_point: "card_center"
+  usb_card_overview_center_target_point: "estimated_slot"
   usb_card_overview_center_require_connector: false
   usb_card_coarse_camera_move_enabled: true
   usb_card_refine_yaw_after_coarse_move: true
-  usb_card_coarse_target_point: "card_center"
+  usb_card_coarse_target_point: "estimated_slot"
   usb_card_coarse_require_connector: false
   usb_card_coarse_min_tool_z: -0.10
   usb_card_final_target_point: "connector"
