@@ -24,8 +24,8 @@ def main() -> None:
         return
 
     print("Samples: %d" % len(samples))
-    _print_stats("Base error actual_port - estimated_port", _vectors(samples, "error_base"))
     _print_stats("Tool error actual_port - estimated_port", _vectors(samples, "error_tool"))
+    _print_stats("Base error actual_port - estimated_port", _vectors(samples, "error_base"))
 
 
 def _load_samples(path: str) -> List[Dict]:

@@ -91,11 +91,12 @@ class UsbCardTargetSelector:
         image_width = int(payload.get("image_width", 0) or 0)
         image_height = int(payload.get("image_height", 0) or 0)
         cards = payload.get("cards", [])
-        if not isinstance(cards, list) or not cards:
-            return self._not_found("usb_card_not_found", stamp, image_width, image_height)
 
         if self._uses_estimated_slot():
             return self._select_estimated_slot(payload, stamp, image_width, image_height)
+
+        if not isinstance(cards, list) or not cards:
+            return self._not_found("usb_card_not_found", stamp, image_width, image_height)
 
         ordered_cards = self._ordered_cards(cards)
         selected_index = self.target_card_index - 1

@@ -27,6 +27,7 @@ GLOBAL_CONFIG_NAMESPACES = frozenset(
         "usb_card_detector",
         "insertion_workflow",
         "combined_workflow",
+        "calibration",
         "move_to_pose_profiles",
         "pose_servo_profiles",
     )

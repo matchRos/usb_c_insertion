@@ -12,6 +12,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
+from param_utils import get_param
+from pose_persistence import save_pose_stamped
 from preinsert_workflow_helpers import PreinsertWorkflowHelpers
 from presentation_snapshot_recorder import PresentationSnapshotRecorder
 
@@ -34,6 +36,9 @@ class PreinsertAlignmentWorkflow:
             queue_size=1,
             latch=True,
         )
+        self._updated_port_pose_path = str(
+            get_param("~workflow/updated_port_pose_path", "/tmp/usb_c_insertion_latest_port_pose.json")
+        ).strip()
 
     def run(self) -> bool:
         rospy.loginfo(
@@ -184,6 +189,7 @@ class PreinsertAlignmentWorkflow:
         if updated_port_pose is None:
             return False
         self._updated_port_pose_publisher.publish(updated_port_pose)
+        save_pose_stamped(updated_port_pose, self._updated_port_pose_path)
 
         tcp_precontact_pose = self._helpers.plan_tcp_precontact_pose(updated_port_pose)
         if tcp_precontact_pose is None:

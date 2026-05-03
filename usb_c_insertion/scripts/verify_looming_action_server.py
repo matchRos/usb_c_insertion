@@ -131,6 +131,7 @@ class VerifyLoomingActionServer:
         image_topic = str(goal.image_topic).strip() or self._default_image_topic
         self._subscribe_image_topic(image_topic)
         self._subscribe_usb_card_detections()
+        self._refresh_usb_card_selector()
 
         travel_distance = abs(self._goal_or_default(goal.travel_distance, self._default_travel_distance))
         travel_speed = abs(self._goal_or_default(goal.travel_speed, self._default_travel_speed))
@@ -184,8 +185,11 @@ class VerifyLoomingActionServer:
         rate = rospy.Rate(self._command_rate)
 
         rospy.loginfo(
-            "[usb_c_insertion] event=verify_looming_started image_topic=%s travel_distance=%.4f travel_speed=%.4f direction_sign=%.1f min_scale_ratio=%.3f max_center_shift_px=%.1f",
+            "[usb_c_insertion] event=verify_looming_started image_topic=%s target_card_index=%d target_point=%s require_connector=%s travel_distance=%.4f travel_speed=%.4f direction_sign=%.1f min_scale_ratio=%.3f max_center_shift_px=%.1f",
             image_topic,
+            self._usb_card_selector.target_card_index,
+            self._usb_card_selector.target_point,
+            str(self._usb_card_selector.require_connector).lower(),
             travel_distance,
             travel_speed,
             direction_sign,
@@ -506,6 +510,37 @@ class VerifyLoomingActionServer:
                 self._usb_card_detections_callback,
                 queue_size=1,
             )
+
+    def _refresh_usb_card_selector(self) -> None:
+        if not self._uses_usb_card_detector():
+            return
+        next_selector = UsbCardTargetSelector.from_ros_params("looming")
+        previous_selector = self._usb_card_selector
+        changed = (
+            previous_selector.target_card_index != next_selector.target_card_index
+            or previous_selector.target_point != next_selector.target_point
+            or previous_selector.require_connector != next_selector.require_connector
+            or previous_selector.order_axis != next_selector.order_axis
+            or previous_selector.order_direction != next_selector.order_direction
+            or previous_selector.expected_card_count != next_selector.expected_card_count
+            or previous_selector.estimated_slot_requires_complete
+            != next_selector.estimated_slot_requires_complete
+        )
+        if not changed:
+            return
+        with self._lock:
+            self._usb_card_selector = next_selector
+            self._latest_detection = None
+        rospy.loginfo(
+            "[usb_c_insertion] event=verify_looming_usb_card_selector_updated target_card_index=%d target_point=%s require_connector=%s order_axis=%s order_direction=%s expected_card_count=%d estimated_slot_requires_complete=%s",
+            next_selector.target_card_index,
+            next_selector.target_point,
+            str(next_selector.require_connector).lower(),
+            next_selector.order_axis,
+            next_selector.order_direction,
+            next_selector.expected_card_count,
+            str(next_selector.estimated_slot_requires_complete).lower(),
+        )
 
     def _uses_usb_card_detector(self) -> bool:
         return self._detection_source in ("usb_card", "usb_card_detector", "card")

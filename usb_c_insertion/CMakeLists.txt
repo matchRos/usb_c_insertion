@@ -194,6 +194,7 @@ catkin_install_python(PROGRAMS
   scripts/micro_move_action_server.py
   scripts/param_utils.py
   scripts/port_calibration_gui.py
+  scripts/pose_persistence.py
   scripts/preinsert_alignment_workflow.py
   scripts/preinsert_workflow_helpers.py
   scripts/pose_servo_node.py

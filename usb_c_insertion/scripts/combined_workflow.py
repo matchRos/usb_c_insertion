@@ -18,7 +18,8 @@ if SCRIPT_DIR not in sys.path:
 from extraction_controller import ExtractionController
 from ft_interface import FTInterface
 from insertion_workflow import InsertionWorkflow
-from param_utils import required_bool_param, required_float_param, required_int_param, required_str_param
+from param_utils import get_param, required_bool_param, required_float_param, required_int_param, required_str_param
+from pose_persistence import save_pose_stamped
 from presentation_snapshot_recorder import PresentationSnapshotRecorder
 from preinsert_workflow_helpers import PreinsertWorkflowHelpers
 from robot_interface import RobotInterface
@@ -145,6 +146,7 @@ class CombinedInsertionWorkflow:
         self._helpers = PreinsertWorkflowHelpers()
         self._snapshots = PresentationSnapshotRecorder()
         updated_topic = self._helpers._required_str_param("~workflow/updated_port_pose_topic")
+        updated_path = str(get_param("~workflow/updated_port_pose_path", "/tmp/usb_c_insertion_latest_port_pose.json")).strip()
         self._updated_port_pose_publisher = rospy.Publisher(updated_topic, PoseStamped, queue_size=1, latch=True)
 
         self._status.publish("dependencies", "running")
@@ -286,11 +288,12 @@ class CombinedInsertionWorkflow:
         if updated_port_pose is None:
             return self._fail("updated_port_pose", "build_failed")
         self._updated_port_pose_publisher.publish(updated_port_pose)
+        save_pose_stamped(updated_port_pose, updated_path)
         self._status.publish(
             "updated_port_pose",
             "success",
             success=True,
-            values={"topic": updated_topic, "port_pose": self._pose_values(updated_port_pose)},
+            values={"topic": updated_topic, "path": updated_path, "port_pose": self._pose_values(updated_port_pose)},
         )
 
         self._status.publish("tcp_precontact", "running")

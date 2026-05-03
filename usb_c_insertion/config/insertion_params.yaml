@@ -120,6 +120,7 @@ housing_plane:
   usb_card_detections_topic: "/usb_c_insertion/usb_card_detector/detections"
   usb_card_target_point: "estimated_slot"
   usb_card_require_connector: false
+  usb_card_estimated_slot_requires_complete: false
   cloud_topic: "/zedm/zed_node/point_cloud/cloud_registered"
   base_transform_frame: "usb_c_zedm_left_camera_optical_frame"
   cloud_to_base_transform_rotation: "camera_frame_to_optical"
@@ -389,7 +390,7 @@ precontact:
 
 workflow:
   overview_vision_mode: "usb_card"
-  target_card_index: 1
+  target_card_index: 3
   usb_card_total_count: 7
   usb_card_estimated_slot_requires_complete: true
   usb_card_target_point: "connector"
@@ -417,6 +418,7 @@ workflow:
   refine_yaw_delta_sign: 1.0
   refine_yaw_max_delta_deg: 45.0
   updated_port_pose_topic: "/usb_c_insertion/updated_port_pose"
+  updated_port_pose_path: "/tmp/usb_c_insertion_latest_port_pose.json"
   min_plane_inlier_ratio: 0.70
   max_plane_rms_error: 0.004
   looming_recenter_enabled: true
@@ -426,10 +428,16 @@ workflow:
 
 calibration:
   updated_port_pose_topic: "/usb_c_insertion/updated_port_pose"
+  latest_estimate_path: "/tmp/usb_c_insertion_latest_port_pose.json"
   output_path: "/tmp/usb_c_insertion_port_calibration_samples.jsonl"
   move_action_name: "move_to_pose_accurate"
   move_timeout: 90.0
   move_settle_time: 0.35
   jog_linear_speed: 0.0015
+  jog_linear_speed_min: 0.0002
+  jog_linear_speed_max: 0.0060
   jog_angular_speed: 0.015
+  jog_angular_speed_min: 0.003
+  jog_angular_speed_max: 0.06
+  jog_speed_step_factor: 1.5
   jog_rate_hz: 30.0

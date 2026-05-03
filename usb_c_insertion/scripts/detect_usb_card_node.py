@@ -1004,12 +1004,12 @@ class UsbCardDetectorNode:
                 str(card_group.complete).lower(),
                 str(card_group.bbox),
             )
-        rospy.loginfo(
-            "[usb_c_insertion] event=usb_card_detector_result count=%d%s %s",
-            len(detections),
-            group_summary,
-            " ".join(summaries),
-        )
+        # rospy.loginfo(
+        #     "[usb_c_insertion] event=usb_card_detector_result count=%d%s %s",
+        #     len(detections),
+        #     group_summary,
+        #     " ".join(summaries),
+        # )
 
     def _card_to_dict(self, index: int, detection: CardDetection) -> dict:
         connector = None

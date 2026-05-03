@@ -21,6 +21,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from param_utils import get_param, required_float_param, required_str_param
+from pose_persistence import load_pose_stamped, save_pose_stamped
 from prepose_planner import normalize_quaternion, rotate_vector_by_quaternion
 from robot_interface import RobotInterface
 from tf_interface import TFInterface
@@ -34,6 +35,7 @@ class PortCalibrationGui:
 
     def __init__(self):
         self._base_frame = required_str_param("~frames/base_frame")
+        self._tool_frame = required_str_param("~frames/tool_frame")
         self._updated_port_pose_topic = str(
             get_param(
                 "~calibration/updated_port_pose_topic",
@@ -42,6 +44,12 @@ class PortCalibrationGui:
         ).strip()
         self._output_path = str(
             get_param("~calibration/output_path", "/tmp/usb_c_insertion_port_calibration_samples.jsonl")
+        ).strip()
+        self._latest_estimate_path = str(
+            get_param(
+                "~calibration/latest_estimate_path",
+                get_param("~workflow/updated_port_pose_path", "/tmp/usb_c_insertion_latest_port_pose.json"),
+            )
         ).strip()
         self._move_action_name = str(
             get_param("~calibration/move_action_name", get_param("~workflow/accurate_move_action_name", "move_to_pose_accurate"))
@@ -52,6 +60,11 @@ class PortCalibrationGui:
         )
         self._jog_linear_speed = float(get_param("~calibration/jog_linear_speed", 0.0015))
         self._jog_angular_speed = float(get_param("~calibration/jog_angular_speed", 0.015))
+        self._jog_linear_speed_min = float(get_param("~calibration/jog_linear_speed_min", 0.0002))
+        self._jog_linear_speed_max = float(get_param("~calibration/jog_linear_speed_max", 0.0060))
+        self._jog_angular_speed_min = float(get_param("~calibration/jog_angular_speed_min", 0.003))
+        self._jog_angular_speed_max = float(get_param("~calibration/jog_angular_speed_max", 0.06))
+        self._jog_speed_step_factor = max(1.01, float(get_param("~calibration/jog_speed_step_factor", 1.5)))
         self._jog_rate_hz = max(5.0, float(get_param("~calibration/jog_rate_hz", 30.0)))
         self._target_card_index = int(get_param("~workflow/target_card_index", 1))
 
@@ -70,7 +83,7 @@ class PortCalibrationGui:
         self._robot = RobotInterface()
         self._move_client = actionlib.SimpleActionClient(self._move_action_name, MoveToPoseAction)
 
-        self._latest_estimated_port_pose: Optional[PoseStamped] = None
+        self._latest_estimated_port_pose: Optional[PoseStamped] = load_pose_stamped(self._latest_estimate_path)
         self._estimated_precontact_pose: Optional[PoseStamped] = None
         self._active_linear_tool = (0.0, 0.0, 0.0)
         self._active_angular_tool = (0.0, 0.0, 0.0)
@@ -94,6 +107,8 @@ class PortCalibrationGui:
         self._root.protocol("WM_DELETE_WINDOW", self._handle_close)
         self._build_ui()
         self._bind_keyboard_controls()
+        if self._latest_estimated_port_pose is not None:
+            self._status.configure(text="loaded saved port estimate")
         self._root.after(100, self._refresh_ui)
         self._root.after(int(1000.0 / self._jog_rate_hz), self._send_active_jog)
 
@@ -150,10 +165,8 @@ class PortCalibrationGui:
         jog.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         for column in range(3):
             jog.columnconfigure(column, weight=1)
-        ttk.Label(jog, text="Hold buttons to move. Linear %.1f mm/s, angular %.1f deg/s" % (
-            self._jog_linear_speed * 1000.0,
-            math.degrees(self._jog_angular_speed),
-        )).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 6))
+        self._jog_speed_label = ttk.Label(jog, text=self._jog_speed_text())
+        self._jog_speed_label.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 6))
         self._jog_button(jog, "-X", (-1.0, 0.0, 0.0), (0.0, 0.0, 0.0), 1, 0)
         self._jog_button(jog, "+X", (1.0, 0.0, 0.0), (0.0, 0.0, 0.0), 1, 1)
         self._jog_button(jog, "-Y", (0.0, -1.0, 0.0), (0.0, 0.0, 0.0), 2, 0)
@@ -170,7 +183,7 @@ class PortCalibrationGui:
             jog,
             text=(
                 "Keyboard: arrows=X/Y, PageUp/PageDown=Z, "
-                "W/S=Rx, A/D=Ry, Q/E=Rz, Space/Esc=stop"
+                "W/S=Rx, A/D=Ry, Q/E=Rz, +/-=speed, Space/Esc=stop"
             ),
         ).grid(row=7, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
@@ -217,6 +230,9 @@ class PortCalibrationGui:
             self._pressed_keys.clear()
             self._stop_motion()
             return
+        if key in ("plus", "minus"):
+            self._adjust_jog_speed(1 if key == "plus" else -1)
+            return
         if key not in self._keyboard_bindings:
             return
         self._pressed_keys.add(key)
@@ -232,7 +248,15 @@ class PortCalibrationGui:
     def _normalize_key(self, key: str) -> str:
         key = str(key)
         if len(key) == 1:
+            if key in ("+", "="):
+                return "plus"
+            if key in ("-", "_"):
+                return "minus"
             return key.lower()
+        if key in ("KP_Add", "plus"):
+            return "plus"
+        if key in ("KP_Subtract", "minus"):
+            return "minus"
         return key
 
     def _update_keyboard_jog(self) -> None:
@@ -250,10 +274,45 @@ class PortCalibrationGui:
         if not self._pressed_keys:
             self._robot.send_zero_twist()
 
+    def _adjust_jog_speed(self, direction: int) -> None:
+        if direction > 0:
+            factor = self._jog_speed_step_factor
+        else:
+            factor = 1.0 / self._jog_speed_step_factor
+        self._jog_linear_speed = self._clamp(
+            self._jog_linear_speed * factor,
+            self._jog_linear_speed_min,
+            self._jog_linear_speed_max,
+        )
+        self._jog_angular_speed = self._clamp(
+            self._jog_angular_speed * factor,
+            self._jog_angular_speed_min,
+            self._jog_angular_speed_max,
+        )
+        self._update_keyboard_jog()
+        self._jog_speed_label.configure(text=self._jog_speed_text())
+        self._set_status(
+            "jog speed: %.2f mm/s, %.2f deg/s" % (
+                self._jog_linear_speed * 1000.0,
+                math.degrees(self._jog_angular_speed),
+            )
+        )
+
+    def _jog_speed_text(self) -> str:
+        return (
+            "Hold buttons/keys to move. Linear %.2f mm/s, angular %.2f deg/s"
+            % (self._jog_linear_speed * 1000.0, math.degrees(self._jog_angular_speed))
+        )
+
     def _updated_port_pose_callback(self, msg: PoseStamped) -> None:
         self._latest_estimated_port_pose = msg
+        self._estimated_precontact_pose = None
+        save_pose_stamped(msg, self._latest_estimate_path)
+        self._set_status("received port estimate")
 
     def _use_latest_estimate(self) -> None:
+        if self._latest_estimated_port_pose is None:
+            self._latest_estimated_port_pose = load_pose_stamped(self._latest_estimate_path)
         if self._latest_estimated_port_pose is None:
             self._set_status("no estimated port pose available")
             return
@@ -331,14 +390,15 @@ class PortCalibrationGui:
 
     def _save_sample(self) -> None:
         if self._latest_estimated_port_pose is None:
+            self._latest_estimated_port_pose = load_pose_stamped(self._latest_estimate_path)
+        if self._latest_estimated_port_pose is None:
             self._set_status("cannot save: no estimated port pose")
             return
         current_tcp = self._tf.get_tool_pose_in_base()
         if current_tcp is None:
             self._set_status("cannot save: no current TCP pose")
             return
-        if self._estimated_precontact_pose is None:
-            self._estimated_precontact_pose = self._plan_precontact_pose(self._latest_estimated_port_pose)
+        self._estimated_precontact_pose = self._plan_precontact_pose(self._latest_estimated_port_pose)
         actual_port_pose = self._actual_port_pose_from_tcp(current_tcp)
         error_base = self._pose_delta(actual_port_pose, self._latest_estimated_port_pose)
         error_tool = self._rotate_base_vector_to_tool(error_base, current_tcp)
@@ -351,6 +411,8 @@ class PortCalibrationGui:
             "target_card_index": self._target_card_index,
             "note": self._note_var.get(),
             "base_frame": self._base_frame,
+            "tool_frame": self._tool_frame,
+            "primary_error_frame": "tool",
             "updated_port_pose_topic": self._updated_port_pose_topic,
             "precontact_offset_tool": {
                 "x": self._precontact_offset_tool[0],
@@ -361,6 +423,7 @@ class PortCalibrationGui:
             "estimated_precontact_pose": self._pose_to_dict(self._estimated_precontact_pose),
             "actual_tcp_pose": self._pose_to_dict(current_tcp),
             "actual_port_pose": self._pose_to_dict(actual_port_pose),
+            "error": self._vector_to_dict(error_tool),
             "error_base": self._vector_to_dict(error_base),
             "error_tool": self._vector_to_dict(error_tool),
             "error_norm_m": math.sqrt(sum(component * component for component in error_base)),
@@ -368,11 +431,11 @@ class PortCalibrationGui:
         with open(self._output_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(sample, sort_keys=True) + "\n")
         self._set_status(
-            "saved sample %d, error=(%.2f, %.2f, %.2f) mm" % (
+            "saved sample %d, tool_error=(%.2f, %.2f, %.2f) mm" % (
                 self._sample_count,
-                error_base[0] * 1000.0,
-                error_base[1] * 1000.0,
-                error_base[2] * 1000.0,
+                error_tool[0] * 1000.0,
+                error_tool[1] * 1000.0,
+                error_tool[2] * 1000.0,
             )
         )
 
@@ -408,13 +471,17 @@ class PortCalibrationGui:
             return
         current_tcp = self._tf.get_tool_pose_in_base()
         actual_port = self._actual_port_pose_from_tcp(current_tcp) if current_tcp is not None else None
-        error = None
+        error_base = None
+        error_tool = None
         if actual_port is not None and self._latest_estimated_port_pose is not None:
-            error = self._pose_delta(actual_port, self._latest_estimated_port_pose)
+            error_base = self._pose_delta(actual_port, self._latest_estimated_port_pose)
+            error_tool = self._rotate_base_vector_to_tool(error_base, current_tcp)
         lines = [
             "updated_port_pose_topic: %s" % self._updated_port_pose_topic,
+            "latest_estimate_path: %s" % self._latest_estimate_path,
             "output_path: %s" % self._output_path,
             "sample_count: %d" % self._sample_count,
+            "primary_error_frame: tool (%s)" % self._tool_frame,
             "",
             "estimated_port_pose:",
             self._format_pose(self._latest_estimated_port_pose),
@@ -428,8 +495,11 @@ class PortCalibrationGui:
             "actual_port_pose_from_current_tcp:",
             self._format_pose(actual_port),
             "",
-            "current_error actual_port - estimated_port:",
-            self._format_vector(error),
+            "current_tool_error actual_port - estimated_port:",
+            self._format_vector(error_tool),
+            "",
+            "current_base_error actual_port - estimated_port:",
+            self._format_vector(error_base),
         ]
         self._pose_text.configure(state="normal")
         self._pose_text.delete("1.0", tk.END)
@@ -448,6 +518,12 @@ class PortCalibrationGui:
         if norm <= 1e-9:
             return (0.0, 0.0, 0.0)
         return tuple(float(component) / norm for component in vector)
+
+    @staticmethod
+    def _clamp(value: float, min_value: float, max_value: float) -> float:
+        lower = min(float(min_value), float(max_value))
+        upper = max(float(min_value), float(max_value))
+        return max(lower, min(upper, float(value)))
 
     def _count_existing_samples(self) -> int:
         try:
