@@ -93,6 +93,8 @@ looming:
   image_topic: "/zedm/zed_node/left/image_rect_color"
   detection_source: "usb_card"
   usb_card_detections_topic: "/usb_c_insertion/usb_card_detector/detections"
+  usb_card_target_point: "card_center"
+  usb_card_require_connector: false
   travel_distance: 0.025
   travel_speed: 0.006
   timeout: 8.0
@@ -348,7 +350,7 @@ usb_card_detector:
   min_card_extent: 0.40
   require_vertical_cards: true
   max_vertical_error_deg: 20.0
-  max_detections: 4
+  max_detections: 8
   card_order_axis: "x"
   card_order_direction: "ascending"
   require_card_group: true
@@ -389,7 +391,7 @@ workflow:
   target_card_index: 1
   usb_card_target_point: "connector"
   usb_card_require_connector: true
-  usb_card_overview_center_before_yaw_enabled: true
+  usb_card_overview_center_before_yaw_enabled: false
   usb_card_overview_center_target_point: "card_center"
   usb_card_overview_center_require_connector: false
   usb_card_coarse_camera_move_enabled: true
@@ -412,7 +414,7 @@ workflow:
   refine_yaw_delta_sign: 1.0
   refine_yaw_max_delta_deg: 45.0
   updated_port_pose_topic: "/usb_c_insertion/updated_port_pose"
-  min_plane_inlier_ratio: 0.80
+  min_plane_inlier_ratio: 0.70
   max_plane_rms_error: 0.004
   looming_recenter_enabled: true
   looming_recenter_min_shift_px: 2.0
