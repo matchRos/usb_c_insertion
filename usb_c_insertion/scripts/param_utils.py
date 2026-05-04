@@ -28,6 +28,7 @@ GLOBAL_CONFIG_NAMESPACES = frozenset(
         "insertion_workflow",
         "combined_workflow",
         "calibration",
+        "repeat_preinsert",
         "move_to_pose_profiles",
         "pose_servo_profiles",
     )

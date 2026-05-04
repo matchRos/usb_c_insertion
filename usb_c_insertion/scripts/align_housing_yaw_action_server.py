@@ -16,6 +16,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from param_utils import (
+    get_param,
     required_bool_param,
     required_float_param,
     required_int_param,
@@ -66,6 +67,14 @@ class AlignHousingYawActionServer:
         self._default_yaw_tolerance_rad = required_float_param("~align_housing_yaw/yaw_tolerance_rad")
         self._default_max_iterations = required_int_param("~align_housing_yaw/max_iterations")
         self._default_max_yaw_step_rad = required_float_param("~align_housing_yaw/max_yaw_step_rad")
+        self._yaw_command_gain = max(0.05, min(1.0, float(get_param("~align_housing_yaw/yaw_command_gain", 1.0))))
+        self._normal_filter_alpha = max(
+            0.0,
+            min(1.0, float(get_param("~align_housing_yaw/normal_filter_alpha", 1.0))),
+        )
+        self._normal_outlier_reject_rad = math.radians(
+            max(0.0, float(get_param("~align_housing_yaw/normal_outlier_reject_deg", 0.0)))
+        )
         self._default_settle_time = required_float_param("~align_housing_yaw/settle_time")
         self._default_move_timeout = required_float_param("~align_housing_yaw/move_timeout")
         self._estimate_wait_timeout = required_float_param("~align_housing_yaw/estimate_wait_timeout")
@@ -90,7 +99,7 @@ class AlignHousingYawActionServer:
         )
         self._server.start()
         rospy.loginfo(
-            "[usb_c_insertion] event=align_housing_yaw_action_ready action=%s estimate_action=%s move_action=%s accurate_move_action=%s accurate_move_after_iteration=%d yaw_tolerance_rad=%.4f max_iterations=%d max_yaw_step_rad=%.4f tool_axis=(%.3f,%.3f,%.3f) plane_normal_sign=%.1f",
+            "[usb_c_insertion] event=align_housing_yaw_action_ready action=%s estimate_action=%s move_action=%s accurate_move_action=%s accurate_move_after_iteration=%d yaw_tolerance_rad=%.4f max_iterations=%d max_yaw_step_rad=%.4f yaw_command_gain=%.2f normal_filter_alpha=%.2f normal_outlier_reject_deg=%.2f tool_axis=(%.3f,%.3f,%.3f) plane_normal_sign=%.1f",
             self._action_name,
             self._estimate_action_name,
             self._move_action_name,
@@ -99,6 +108,9 @@ class AlignHousingYawActionServer:
             self._default_yaw_tolerance_rad,
             self._default_max_iterations,
             self._default_max_yaw_step_rad,
+            self._yaw_command_gain,
+            self._normal_filter_alpha,
+            math.degrees(self._normal_outlier_reject_rad),
             self._tool_axis[0],
             self._tool_axis[1],
             self._tool_axis[2],
@@ -143,6 +155,7 @@ class AlignHousingYawActionServer:
         correction_count = 0
         final_normal = Vector3()
         final_pose: Optional[PoseStamped] = None
+        filtered_target_axis_xy: Optional[Tuple[float, float]] = None
 
         for measurement_index in range(max(0, max_iterations) + 1):
             if self._server.is_preempt_requested():
@@ -193,7 +206,18 @@ class AlignHousingYawActionServer:
                 )
                 return
 
-            yaw_error = self._compute_yaw_error(current_pose, plane_result.plane_normal_base)
+            measured_target_axis_xy = self._target_axis_xy(plane_result.plane_normal_base)
+            filtered_target_axis_xy, used_measurement = self._update_filtered_target_axis(
+                filtered_target_axis_xy,
+                measured_target_axis_xy,
+            )
+            control_normal = self._normal_from_target_axis(
+                filtered_target_axis_xy,
+                plane_result.plane_normal_base,
+            )
+            self._log_normal_filter(measurement_index, measured_target_axis_xy, filtered_target_axis_xy, used_measurement)
+
+            yaw_error = self._compute_yaw_error(current_pose, control_normal)
             if yaw_error is None:
                 self._abort(
                     "yaw_error_unobservable",
@@ -202,7 +226,7 @@ class AlignHousingYawActionServer:
                     initial_error=initial_error,
                     final_error=final_error,
                     total_yaw_command=total_yaw_command,
-                    final_normal=plane_result.plane_normal_base,
+                    final_normal=control_normal,
                     final_pose=current_pose,
                 )
                 return
@@ -210,7 +234,7 @@ class AlignHousingYawActionServer:
             if initial_error is None:
                 initial_error = yaw_error
             final_error = yaw_error
-            final_normal = plane_result.plane_normal_base
+            final_normal = control_normal
             final_pose = current_pose
 
             if abs(yaw_error) <= yaw_tolerance_rad:
@@ -221,6 +245,7 @@ class AlignHousingYawActionServer:
                     0.0,
                     total_yaw_command,
                     plane_result,
+                    control_normal,
                 )
                 result = self._make_result(
                     True,
@@ -251,6 +276,7 @@ class AlignHousingYawActionServer:
                     0.0,
                     total_yaw_command,
                     plane_result,
+                    control_normal,
                 )
                 self._abort(
                     "max_iterations_reached",
@@ -264,7 +290,7 @@ class AlignHousingYawActionServer:
                 )
                 return
 
-            yaw_command = self._limit_yaw_step(yaw_error, max_yaw_step_rad)
+            yaw_command = self._limit_yaw_step(yaw_error * self._yaw_command_gain, max_yaw_step_rad)
             target_pose = self._build_yaw_target_pose(current_pose, yaw_command)
             self._publish_feedback(
                 "move_to_corrected_yaw",
@@ -273,6 +299,7 @@ class AlignHousingYawActionServer:
                 yaw_command,
                 total_yaw_command + yaw_command,
                 plane_result,
+                control_normal,
             )
             correction_number = correction_count + 1
             move_result = self._move_to_pose(target_pose, settle_time, move_timeout, correction_number)
@@ -297,7 +324,7 @@ class AlignHousingYawActionServer:
                 current_pose,
                 target_pose,
                 move_result.final_pose,
-                plane_result.plane_normal_base,
+                control_normal,
                 yaw_error,
                 yaw_command,
             )
@@ -479,6 +506,73 @@ class AlignHousingYawActionServer:
         dot = current_xy[0] * target_xy[0] + current_xy[1] * target_xy[1]
         return math.atan2(cross_z, dot)
 
+    def _update_filtered_target_axis(
+        self,
+        previous_axis: Optional[Tuple[float, float]],
+        measured_axis: Optional[Tuple[float, float]],
+    ) -> Tuple[Optional[Tuple[float, float]], bool]:
+        if measured_axis is None:
+            return previous_axis, False
+        if previous_axis is None:
+            return measured_axis, True
+
+        delta = self._signed_xy_angle(previous_axis, measured_axis)
+        if (
+            delta is not None
+            and self._normal_outlier_reject_rad > 0.0
+            and abs(delta) > self._normal_outlier_reject_rad
+        ):
+            return previous_axis, False
+
+        alpha = self._normal_filter_alpha
+        if alpha >= 1.0:
+            return measured_axis, True
+        if alpha <= 0.0:
+            return previous_axis, True
+        blended = self._normalize_xy(
+            (
+                (1.0 - alpha) * previous_axis[0] + alpha * measured_axis[0],
+                (1.0 - alpha) * previous_axis[1] + alpha * measured_axis[1],
+            )
+        )
+        return (blended if blended is not None else previous_axis), True
+
+    def _normal_from_target_axis(
+        self,
+        target_axis_xy: Optional[Tuple[float, float]],
+        measured_normal: Vector3,
+    ) -> Vector3:
+        if target_axis_xy is None:
+            return measured_normal
+        normal = Vector3()
+        normal.x = self._target_axis_from_plane_normal_sign * target_axis_xy[0]
+        normal.y = self._target_axis_from_plane_normal_sign * target_axis_xy[1]
+        normal.z = float(measured_normal.z)
+        return normal
+
+    def _log_normal_filter(
+        self,
+        iteration: int,
+        measured_axis: Optional[Tuple[float, float]],
+        filtered_axis: Optional[Tuple[float, float]],
+        used_measurement: bool,
+    ) -> None:
+        if measured_axis is None or filtered_axis is None:
+            return
+        delta = self._signed_xy_angle(filtered_axis, measured_axis)
+        rospy.loginfo(
+            "[usb_c_insertion] event=align_housing_yaw_normal_filter iteration=%d "
+            "used_measurement=%s measured_axis_xy=(%.4f,%.4f) filtered_axis_xy=(%.4f,%.4f) "
+            "measurement_delta_deg=%.2f",
+            int(iteration),
+            str(bool(used_measurement)).lower(),
+            measured_axis[0],
+            measured_axis[1],
+            filtered_axis[0],
+            filtered_axis[1],
+            self._degrees_or_nan(delta),
+        )
+
     def _tool_axis_xy(self, pose: PoseStamped) -> Optional[Tuple[float, float]]:
         qx, qy, qz, qw = self._pose_quaternion(pose)
         axis = rotate_vector_by_quaternion(
@@ -508,14 +602,16 @@ class AlignHousingYawActionServer:
         yaw_command: float,
         total_yaw_command: float,
         plane_result,
+        control_normal: Optional[Vector3] = None,
     ) -> None:
+        normal_base = control_normal if control_normal is not None else plane_result.plane_normal_base
         feedback = AlignHousingYawFeedback()
         feedback.stage = str(stage)
         feedback.iteration = int(iteration)
         feedback.yaw_error_rad = float(yaw_error)
         feedback.yaw_command_rad = float(yaw_command)
         feedback.total_yaw_command_rad = float(total_yaw_command)
-        feedback.normal_base = plane_result.plane_normal_base
+        feedback.normal_base = normal_base
         feedback.inlier_ratio = float(plane_result.inlier_ratio)
         feedback.rms_error = float(plane_result.rms_error)
         self._server.publish_feedback(feedback)
@@ -526,9 +622,9 @@ class AlignHousingYawActionServer:
             math.degrees(yaw_error),
             math.degrees(yaw_command),
             math.degrees(total_yaw_command),
-            plane_result.plane_normal_base.x,
-            plane_result.plane_normal_base.y,
-            plane_result.plane_normal_base.z,
+            normal_base.x,
+            normal_base.y,
+            normal_base.z,
             plane_result.inlier_ratio,
             plane_result.rms_error,
         )

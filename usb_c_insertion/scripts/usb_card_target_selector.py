@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import math
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import rospy
 
@@ -26,6 +26,7 @@ class UsbCardTarget:
     card_index: int = 0
     source_card_index: int = 0
     target_kind: str = ""
+    bbox: Optional[Tuple[int, int, int, int]] = None
 
 
 class UsbCardTargetSelector:
@@ -125,6 +126,7 @@ class UsbCardTargetSelector:
         center_y = float(target.get("center_y", 0.0) or 0.0)
         area = float(card.get("area", target.get("area", 0.0)) or 0.0)
         aspect_ratio = self._card_aspect_ratio(card)
+        bbox = self._bbox_from_target(target)
         return UsbCardTarget(
             stamp=stamp,
             image_width=image_width,
@@ -138,6 +140,7 @@ class UsbCardTargetSelector:
             card_index=self.target_card_index,
             source_card_index=int(card.get("index", selected_index) or 0),
             target_kind="connector" if target is connector else "card_center",
+            bbox=bbox,
         )
 
     def _uses_estimated_slot(self) -> bool:
@@ -217,6 +220,19 @@ class UsbCardTargetSelector:
             source_card_index=selected_index,
             target_kind="estimated_slot",
         )
+
+    @staticmethod
+    def _bbox_from_target(target: Dict[str, Any]) -> Optional[Tuple[int, int, int, int]]:
+        bbox = target.get("bbox")
+        if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+            return None
+        try:
+            x, y, width, height = (int(round(float(value))) for value in bbox)
+        except (TypeError, ValueError):
+            return None
+        if width <= 0 or height <= 0:
+            return None
+        return (x, y, width, height)
 
     def _ordered_cards(self, cards: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         axis = self.order_axis

@@ -112,6 +112,10 @@ looming:
   morph_kernel_size: 5
   foe_debug_enabled: true
   foe_debug_output_dir: "/tmp/usb_c_insertion_looming_foe"
+  frame_debug_enabled: true
+  frame_debug_output_dir: "/tmp/usb_c_insertion_looming_frames"
+  frame_debug_rate_hz: 5.0
+  frame_debug_max_frames: 80
 
 housing_plane:
   action_name: "estimate_housing_plane"
@@ -127,12 +131,12 @@ housing_plane:
   timeout: 3.0
   command_rate: 20.0
   min_blob_area: 120.0
-  roi_radius_px: 70
-  roi_stride_px: 2
+  roi_radius_px: 50
+  roi_stride_px: 1
   depth_window_m: 0.06
   ransac_iterations: 120
   ransac_distance_threshold: 0.004
-  min_inliers: 120
+  min_inliers: 90
   use_svd_refit: true
   use_largest_component: true
   marker_ray_window_px: 8
@@ -152,9 +156,12 @@ align_housing_yaw:
   image_topic: "/zedm/zed_node/left/image_rect_color"
   cloud_topic: "/zedm/zed_node/point_cloud/cloud_registered"
   estimate_timeout: 3.0
-  yaw_tolerance_rad: 0.01
-  max_iterations: 15
+  yaw_tolerance_rad: 0.02
+  max_iterations: 10
   max_yaw_step_rad: 0.25
+  yaw_command_gain: 0.60
+  normal_filter_alpha: 0.40
+  normal_outlier_reject_deg: 12.0
   settle_time: 0.15
   move_timeout: 20.0
   estimate_wait_timeout: 5.0
@@ -384,7 +391,7 @@ precontact:
   target_offset_tool_y: +0.0018
   precontact_offset_tool_x: -0.000
   precontact_offset_tool_y: 0.000
-  precontact_offset_tool_z: -0.016
+  precontact_offset_tool_z: -0.026
   enforce_precontact_standoff: true
   min_precontact_standoff: 0.008
 
@@ -443,3 +450,14 @@ calibration:
   jog_angular_speed_max: 0.06
   jog_speed_step_factor: 1.5
   jog_rate_hz: 30.0
+
+repeat_preinsert:
+  iterations: 10
+  output_path: "/tmp/usb_c_insertion_preinsert_repeat_estimates.jsonl"
+  vary_photo_pose: true
+  photo_pose_variation_x: 0.05
+  photo_pose_variation_y: 0.05
+  settle_between_runs: 1.0
+  stop_on_failure: false
+  snapshot_subdirs: true
+  snapshot_base_dir: "/tmp/usb_c_insertion_presentation_snapshots"

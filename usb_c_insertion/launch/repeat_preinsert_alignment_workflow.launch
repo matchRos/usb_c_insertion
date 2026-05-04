@@ -1,0 +1,13 @@
+<launch>
+  <include file="$(find usb_c_insertion)/launch/clear_legacy_params.launch" />
+
+  <rosparam command="load" file="$(find usb_c_insertion)/config/topics.yaml" />
+  <rosparam command="load" file="$(find usb_c_insertion)/config/frames.yaml" />
+  <rosparam command="load" file="$(find usb_c_insertion)/config/insertion_params.yaml" />
+
+  <node pkg="usb_c_insertion"
+        type="repeat_preinsert_alignment_workflow.py"
+        name="usb_c_insertion_repeat_preinsert_alignment_workflow"
+        output="screen" clear_params="true">
+  </node>
+</launch>

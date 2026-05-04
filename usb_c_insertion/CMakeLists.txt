@@ -198,6 +198,7 @@ catkin_install_python(PROGRAMS
   scripts/preinsert_alignment_workflow.py
   scripts/preinsert_workflow_helpers.py
   scripts/pose_servo_node.py
+  scripts/repeat_preinsert_alignment_workflow.py
   scripts/run_vision_service.py
   scripts/twist_controller_node.py
   scripts/usb_card_target_selector.py

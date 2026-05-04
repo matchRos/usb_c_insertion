@@ -55,6 +55,7 @@ class GreenBlobDetection:
     bgr: Optional[np.ndarray] = None
     gray: Optional[np.ndarray] = None
     mask: Optional[np.ndarray] = None
+    bbox: Optional[Tuple[int, int, int, int]] = None
 
 
 class VerifyLoomingActionServer:
@@ -89,6 +90,10 @@ class VerifyLoomingActionServer:
         self._morph_kernel_size = max(0, required_int_param("~looming/morph_kernel_size"))
         self._foe_debug_enabled = required_bool_param("~looming/foe_debug_enabled")
         self._foe_debug_output_dir = required_str_param("~looming/foe_debug_output_dir")
+        self._frame_debug_enabled = required_bool_param("~looming/frame_debug_enabled")
+        self._frame_debug_output_dir = required_str_param("~looming/frame_debug_output_dir")
+        self._frame_debug_rate_hz = max(0.1, required_float_param("~looming/frame_debug_rate_hz"))
+        self._frame_debug_max_frames = max(0, required_int_param("~looming/frame_debug_max_frames"))
         self._detection_source = str(get_param("~looming/detection_source", "green_marker")).strip().lower()
         self._usb_card_detections_topic = str(
             get_param(
@@ -106,6 +111,11 @@ class VerifyLoomingActionServer:
         self._image_subscriber = None
         self._usb_card_detections_subscriber = None
         self._latest_detection: Optional[GreenBlobDetection] = None
+        self._latest_bgr: Optional[np.ndarray] = None
+        self._latest_bgr_stamp = rospy.Time(0)
+        self._frame_debug_run_dir = ""
+        self._frame_debug_count = 0
+        self._frame_debug_last_save = rospy.Time(0)
 
         self._subscribe_image_topic(self._default_image_topic)
         self._subscribe_usb_card_detections()
@@ -157,6 +167,7 @@ class VerifyLoomingActionServer:
             return
 
         started_at = rospy.Time.now()
+        self._start_frame_debug_run(started_at)
         deadline = started_at + rospy.Duration.from_sec(max(0.1, timeout))
         initial_detection = self._wait_for_initial_detection(deadline, min_blob_area)
         if initial_detection is None:
@@ -183,6 +194,7 @@ class VerifyLoomingActionServer:
         last_seen_time = rospy.Time.now()
         latest_detection = initial_detection
         rate = rospy.Rate(self._command_rate)
+        self._save_frame_debug_image("initial", initial_detection, initial_detection)
 
         rospy.loginfo(
             "[usb_c_insertion] event=verify_looming_started image_topic=%s target_card_index=%d target_point=%s require_connector=%s travel_distance=%.4f travel_speed=%.4f direction_sign=%.1f min_scale_ratio=%.3f max_center_shift_px=%.1f",
@@ -218,6 +230,7 @@ class VerifyLoomingActionServer:
                 continue
             if not detection.found:
                 self._robot.send_zero_twist()
+                self._save_frame_debug_image("not_found", detection, initial_detection)
                 if (now - last_seen_time).to_sec() > self._max_lost_time:
                     self._abort("marker_lost", detection, initial_detection, started_at, verified_center_pose, start_xyz)
                     return
@@ -241,6 +254,7 @@ class VerifyLoomingActionServer:
 
             traveled_distance = self._traveled_distance(start_xyz, tool_z)
             scale_ratio = self._scale_ratio(initial_detection, detection)
+            self._save_frame_debug_image("verifying", detection, initial_detection)
             self._publish_feedback(
                 "verifying",
                 started_at,
@@ -321,6 +335,18 @@ class VerifyLoomingActionServer:
 
     def _image_callback(self, msg: Image) -> None:
         if self._uses_usb_card_detector():
+            try:
+                bgr = self._rotate_image_for_processing(self._image_to_bgr(msg))
+                stamp = msg.header.stamp if msg.header.stamp != rospy.Time() else rospy.Time.now()
+                with self._lock:
+                    self._latest_bgr = bgr
+                    self._latest_bgr_stamp = stamp
+            except ValueError as exc:
+                rospy.logwarn_throttle(
+                    2.0,
+                    "[usb_c_insertion] event=verify_looming_frame_image_failed error=%s",
+                    exc,
+                )
             return
         try:
             detection = self._detect_green_blob(msg)
@@ -334,6 +360,8 @@ class VerifyLoomingActionServer:
             )
         with self._lock:
             self._latest_detection = detection
+            self._latest_bgr = detection.bgr
+            self._latest_bgr_stamp = detection.stamp
 
     def _usb_card_detections_callback(self, msg: String) -> None:
         if not self._uses_usb_card_detector():
@@ -349,6 +377,7 @@ class VerifyLoomingActionServer:
             area=target.area,
             aspect_ratio=target.aspect_ratio,
             message=target.message,
+            bbox=target.bbox,
         )
         with self._lock:
             self._latest_detection = detection
@@ -431,6 +460,7 @@ class VerifyLoomingActionServer:
             bgr=bgr,
             gray=gray,
             mask=mask,
+            bbox=None,
         )
 
     def _image_to_bgr(self, msg: Image) -> np.ndarray:
@@ -495,6 +525,7 @@ class VerifyLoomingActionServer:
                 bgr=detection.bgr,
                 gray=detection.gray,
                 mask=detection.mask,
+                bbox=detection.bbox,
             )
         return detection
 
@@ -573,6 +604,129 @@ class VerifyLoomingActionServer:
             feedback.aspect_ratio_change = self._aspect_ratio_change(initial_detection, current_detection)
         feedback.command_tool_z = float(command_tool_z)
         self._server.publish_feedback(feedback)
+
+    def _start_frame_debug_run(self, started_at: rospy.Time) -> None:
+        self._frame_debug_count = 0
+        self._frame_debug_last_save = rospy.Time(0)
+        self._frame_debug_run_dir = ""
+        if not self._frame_debug_enabled:
+            return
+        stamp = "%s_%09d" % (time.strftime("%Y%m%d_%H%M%S"), started_at.nsecs)
+        self._frame_debug_run_dir = os.path.join(self._frame_debug_output_dir, "looming_%s" % stamp)
+        try:
+            os.makedirs(self._frame_debug_run_dir, exist_ok=True)
+        except OSError as exc:
+            rospy.logwarn(
+                "[usb_c_insertion] event=verify_looming_frame_debug_dir_failed dir=%s error=%s disabling=true",
+                self._frame_debug_run_dir,
+                exc,
+            )
+            self._frame_debug_run_dir = ""
+            return
+        rospy.loginfo(
+            "[usb_c_insertion] event=verify_looming_frame_debug_started dir=%s rate_hz=%.2f max_frames=%d",
+            self._frame_debug_run_dir,
+            self._frame_debug_rate_hz,
+            self._frame_debug_max_frames,
+        )
+
+    def _save_frame_debug_image(
+        self,
+        stage: str,
+        detection: Optional[GreenBlobDetection],
+        initial_detection: Optional[GreenBlobDetection],
+    ) -> None:
+        if not self._frame_debug_enabled or not self._frame_debug_run_dir:
+            return
+        if self._frame_debug_max_frames > 0 and self._frame_debug_count >= self._frame_debug_max_frames:
+            return
+        now = rospy.Time.now()
+        min_interval = 1.0 / max(0.1, self._frame_debug_rate_hz)
+        if self._frame_debug_count > 0 and (now - self._frame_debug_last_save).to_sec() < min_interval:
+            return
+
+        bgr = detection.bgr if detection is not None and detection.bgr is not None else None
+        if bgr is None:
+            with self._lock:
+                bgr = None if self._latest_bgr is None else self._latest_bgr.copy()
+        else:
+            bgr = bgr.copy()
+        if bgr is None:
+            rospy.loginfo_throttle(2.0, "[usb_c_insertion] event=verify_looming_frame_debug_skipped reason=missing_image")
+            return
+
+        mask = self._frame_debug_mask(bgr.shape[:2], detection)
+        debug = bgr.copy()
+        if mask is not None and np.any(mask > 0):
+            tint = debug.copy()
+            tint[mask > 0] = (255, 0, 255)
+            debug = cv2.addWeighted(debug, 0.72, tint, 0.28, 0.0)
+            contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            cv2.drawContours(debug, contours, -1, (255, 0, 255), 2)
+            self._put_label(debug, "Port mask", detection.center_x + 8.0, detection.center_y - 8.0, (255, 0, 255))
+
+        height, width = debug.shape[:2]
+        self._draw_cross(debug, width * 0.5, height * 0.5, (255, 255, 0), 10, 2)
+        self._put_label(debug, "Image center", width * 0.5 + 10.0, height * 0.5 - 10.0, (255, 255, 0))
+
+        self._frame_debug_count += 1
+        self._frame_debug_last_save = now
+        filename = "frame_%03d_%s.png" % (self._frame_debug_count, self._safe_filename_fragment(stage))
+        path = os.path.join(self._frame_debug_run_dir, filename)
+        if not cv2.imwrite(path, debug):
+            rospy.logwarn("[usb_c_insertion] event=verify_looming_frame_debug_write_failed path=%s", path)
+
+    def _frame_debug_mask(self, image_shape, detection: Optional[GreenBlobDetection]) -> Optional[np.ndarray]:
+        height, width = image_shape[:2]
+        if detection is None or not detection.found:
+            return None
+        if detection.mask is not None and detection.mask.shape[:2] == (height, width):
+            return detection.mask.astype(np.uint8)
+
+        mask = np.zeros((height, width), dtype=np.uint8)
+        if detection.bbox is not None:
+            x, y, box_width, box_height = detection.bbox
+            x0 = max(0, min(width - 1, int(x)))
+            y0 = max(0, min(height - 1, int(y)))
+            x1 = max(x0 + 1, min(width, int(x + box_width)))
+            y1 = max(y0 + 1, min(height, int(y + box_height)))
+            mask[y0:y1, x0:x1] = 255
+            return mask
+
+        radius = max(4, int(round(math.sqrt(max(1.0, float(detection.area))) * 0.08)))
+        cv2.circle(
+            mask,
+            (int(round(detection.center_x)), int(round(detection.center_y))),
+            radius,
+            255,
+            thickness=-1,
+        )
+        return mask
+
+    @staticmethod
+    def _put_label(image: np.ndarray, text: str, x: float, y: float, color) -> None:
+        px = max(4, min(image.shape[1] - 4, int(round(float(x)))))
+        py = max(16, min(image.shape[0] - 4, int(round(float(y)))))
+        cv2.putText(
+            image,
+            text,
+            (px, py),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (0, 0, 0),
+            3,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            image,
+            text,
+            (px, py),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            color,
+            1,
+            cv2.LINE_AA,
+        )
 
     def _log_foe_debug_analysis(
         self,
