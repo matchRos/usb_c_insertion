@@ -375,7 +375,7 @@ usb_card_detector:
   connector_max_area_ratio: 0.25
   connector_min_aspect_ratio: 1.8
   connector_max_aspect_ratio: 7.0
-  connector_max_center_offset_norm: 0.45
+  connector_max_center_offset_norm: 0.60
   connector_mask_erode_px: 3
   connector_morph_kernel_size: 1
 
@@ -421,6 +421,8 @@ workflow:
   updated_port_pose_path: "/tmp/usb_c_insertion_latest_port_pose.json"
   min_plane_inlier_ratio: 0.70
   max_plane_rms_error: 0.004
+  final_depth_update_max_base_xy_shift: 0.006
+  final_depth_update_fallback_to_orientation_check: true
   looming_recenter_enabled: true
   looming_recenter_min_shift_px: 2.0
   looming_recenter_max_attempts: 1

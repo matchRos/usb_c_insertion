@@ -759,6 +759,57 @@ class PreinsertWorkflowHelpers:
             return False
         return True
 
+    def select_final_plane_estimate(self, orientation_plane, final_plane):
+        max_base_xy_shift = float(get_param("~workflow/final_depth_update_max_base_xy_shift", 0.006))
+        fallback_enabled = self._optional_bool_param(
+            "~workflow/final_depth_update_fallback_to_orientation_check",
+            True,
+        )
+        orientation_point = orientation_plane.marker_plane_point_base.point
+        final_point = final_plane.marker_plane_point_base.point
+        dx = float(final_point.x - orientation_point.x)
+        dy = float(final_point.y - orientation_point.y)
+        dz = float(final_point.z - orientation_point.z)
+        base_xy_shift = math.hypot(dx, dy)
+        total_shift = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if base_xy_shift <= max_base_xy_shift:
+            rospy.loginfo(
+                "[usb_c_insertion] event=preinsert_final_depth_update_accepted "
+                "base_xy_shift=%.4f total_shift=%.4f max_base_xy_shift=%.4f",
+                base_xy_shift,
+                total_shift,
+                max_base_xy_shift,
+            )
+            return final_plane
+
+        if fallback_enabled:
+            rospy.logwarn(
+                "[usb_c_insertion] event=preinsert_final_depth_update_rejected "
+                "base_xy_shift=%.4f total_shift=%.4f max_base_xy_shift=%.4f "
+                "fallback=orientation_check "
+                "orientation_point=(%.4f,%.4f,%.4f) final_point=(%.4f,%.4f,%.4f)",
+                base_xy_shift,
+                total_shift,
+                max_base_xy_shift,
+                orientation_point.x,
+                orientation_point.y,
+                orientation_point.z,
+                final_point.x,
+                final_point.y,
+                final_point.z,
+            )
+            return orientation_plane
+
+        rospy.logerr(
+            "[usb_c_insertion] event=preinsert_workflow_failed "
+            "reason=final_depth_update_shift_too_large base_xy_shift=%.4f "
+            "total_shift=%.4f max_base_xy_shift=%.4f",
+            base_xy_shift,
+            total_shift,
+            max_base_xy_shift,
+        )
+        return None
+
     def build_updated_port_pose(self, plane_result) -> Optional[PoseStamped]:
         current_pose = self._tf.get_tool_pose_in_base()
         if current_pose is None:

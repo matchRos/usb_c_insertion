@@ -184,8 +184,11 @@ class PreinsertAlignmentWorkflow:
             return False
         if not self._helpers.validate_plane_quality(final_plane, "final_depth_update"):
             return False
+        selected_plane = self._helpers.select_final_plane_estimate(orientation_check, final_plane)
+        if selected_plane is None:
+            return False
 
-        updated_port_pose = self._helpers.build_updated_port_pose(final_plane)
+        updated_port_pose = self._helpers.build_updated_port_pose(selected_plane)
         if updated_port_pose is None:
             return False
         self._updated_port_pose_publisher.publish(updated_port_pose)
