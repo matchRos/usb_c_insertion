@@ -180,9 +180,7 @@ class PreinsertAlignmentWorkflow:
             usb_card_target_point=self._helpers.usb_card_final_target_point(),
             usb_card_require_connector=self._helpers.usb_card_final_require_connector(),
         )
-        if final_plane is None:
-            return False
-        if not self._helpers.validate_plane_quality(final_plane, "final_depth_update"):
+        if final_plane is not None and not self._helpers.validate_plane_quality(final_plane, "final_depth_update"):
             return False
         selected_plane = self._helpers.select_final_plane_estimate(orientation_check, final_plane)
         if selected_plane is None:

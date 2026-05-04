@@ -765,6 +765,19 @@ class PreinsertWorkflowHelpers:
             "~workflow/final_depth_update_fallback_to_orientation_check",
             True,
         )
+        if final_plane is None:
+            if fallback_enabled:
+                rospy.logwarn(
+                    "[usb_c_insertion] event=preinsert_final_depth_update_unavailable "
+                    "fallback=orientation_check",
+                )
+                return orientation_plane
+            rospy.logerr(
+                "[usb_c_insertion] event=preinsert_workflow_failed "
+                "reason=final_depth_update_unavailable fallback=disabled",
+            )
+            return None
+
         orientation_point = orientation_plane.marker_plane_point_base.point
         final_point = final_plane.marker_plane_point_base.point
         dx = float(final_point.x - orientation_point.x)

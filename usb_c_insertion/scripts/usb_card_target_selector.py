@@ -153,6 +153,17 @@ class UsbCardTargetSelector:
             "estimated_card_center",
         )
 
+    def with_target(self, target_point: str, require_connector: bool) -> "UsbCardTargetSelector":
+        return UsbCardTargetSelector(
+            target_card_index=self.target_card_index,
+            target_point=target_point,
+            require_connector=require_connector,
+            order_axis=self.order_axis,
+            order_direction=self.order_direction,
+            expected_card_count=self.expected_card_count,
+            estimated_slot_requires_complete=self.estimated_slot_requires_complete,
+        )
+
     def _select_estimated_slot(
         self,
         payload: Dict[str, Any],

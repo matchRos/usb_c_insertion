@@ -121,14 +121,18 @@ looming:
 housing_plane:
   action_name: "estimate_housing_plane"
   image_topic: "/zedm/zed_node/left/image_rect_color"
+  camera_info_topic: "/zedm/zed_node/left/camera_info"
   detection_source: "usb_card"
   usb_card_detections_topic: "/usb_c_insertion/usb_card_detector/detections"
   usb_card_target_point: "estimated_slot"
   usb_card_require_connector: false
+  usb_card_plane_target_point: "card_center"
+  usb_card_plane_require_connector: false
   usb_card_estimated_slot_requires_complete: false
   cloud_topic: "/zedm/zed_node/point_cloud/cloud_registered"
   base_transform_frame: "usb_c_zedm_left_camera_optical_frame"
   cloud_to_base_transform_rotation: "camera_frame_to_optical"
+  marker_ray_source: "camera_info"
   timeout: 3.0
   command_rate: 20.0
   min_blob_area: 120.0
@@ -422,7 +426,7 @@ workflow:
   accurate_move_settle_time: 0.35
   accurate_move_timeout: 90.0
   refine_camera_frame: "usb_c_zedm_left_camera_optical_frame"
-  refine_camera_distance: 0.14
+  refine_camera_distance: 0.15
   refine_yaw_delta_sign: 1.0
   refine_yaw_max_delta_deg: 45.0
   updated_port_pose_topic: "/usb_c_insertion/updated_port_pose"

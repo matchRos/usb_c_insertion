@@ -277,14 +277,15 @@ class CombinedInsertionWorkflow:
 
         self._status.publish("final_plane", "running")
         final_plane = self._helpers.estimate_housing_plane("final_depth_update")
-        if final_plane is None:
-            return self._fail("final_plane", "estimate_failed")
-        if not self._helpers.validate_plane_quality(final_plane, "final_depth_update"):
+        if final_plane is not None and not self._helpers.validate_plane_quality(final_plane, "final_depth_update"):
             return self._fail("final_plane", "quality_failed", self._plane_values(final_plane))
-        self._status.publish("final_plane", "success", success=True, values=self._plane_values(final_plane))
+        selected_plane = self._helpers.select_final_plane_estimate(orientation_check, final_plane)
+        if selected_plane is None:
+            return self._fail("final_plane", "estimate_failed")
+        self._status.publish("final_plane", "success", success=True, values=self._plane_values(selected_plane))
 
         self._status.publish("updated_port_pose", "running")
-        updated_port_pose = self._helpers.build_updated_port_pose(final_plane)
+        updated_port_pose = self._helpers.build_updated_port_pose(selected_plane)
         if updated_port_pose is None:
             return self._fail("updated_port_pose", "build_failed")
         self._updated_port_pose_publisher.publish(updated_port_pose)

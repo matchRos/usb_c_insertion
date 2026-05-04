@@ -15,7 +15,7 @@ import cv2
 from geometry_msgs.msg import PointStamped, Vector3
 import numpy as np
 import rospy
-from sensor_msgs.msg import Image, PointCloud2
+from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 import sensor_msgs.point_cloud2 as point_cloud2
 from std_msgs.msg import String
 
@@ -51,6 +51,8 @@ class GreenBlobDetection:
     found: bool
     center_x: float = 0.0
     center_y: float = 0.0
+    roi_center_x: Optional[float] = None
+    roi_center_y: Optional[float] = None
     area: float = 0.0
     message: str = ""
 
@@ -76,6 +78,7 @@ class EstimateHousingPlaneActionServer:
     def __init__(self):
         self._action_name = required_str_param("~housing_plane/action_name")
         self._default_image_topic = required_str_param("~housing_plane/image_topic")
+        self._default_camera_info_topic = required_str_param("~housing_plane/camera_info_topic")
         self._default_cloud_topic = required_str_param("~housing_plane/cloud_topic")
         self._base_frame = required_str_param("~frames/base_frame")
         self._base_transform_frame = required_str_param("~housing_plane/base_transform_frame")
@@ -96,6 +99,7 @@ class EstimateHousingPlaneActionServer:
         self._default_use_svd_refit = required_bool_param("~housing_plane/use_svd_refit")
         self._default_use_largest_component = required_bool_param("~housing_plane/use_largest_component")
         self._marker_ray_window_px = max(0, required_int_param("~housing_plane/marker_ray_window_px"))
+        self._marker_ray_source = str(get_param("~housing_plane/marker_ray_source", "camera_info")).strip().lower()
         self._max_image_age = required_float_param("~housing_plane/max_image_age")
         self._max_cloud_age = required_float_param("~housing_plane/max_cloud_age")
         self._image_rotation_deg = self._normalize_image_rotation_deg(
@@ -112,18 +116,23 @@ class EstimateHousingPlaneActionServer:
             )
         ).strip()
         self._usb_card_selector = UsbCardTargetSelector.from_ros_params("housing_plane")
+        self._usb_card_plane_selector = self._make_usb_card_plane_selector(self._usb_card_selector)
 
         self._tf = TFInterface()
         self._lock = RLock()
         self._image_topic = ""
+        self._camera_info_topic = ""
         self._cloud_topic = ""
         self._image_subscriber = None
+        self._camera_info_subscriber = None
         self._cloud_subscriber = None
         self._usb_card_detections_subscriber = None
         self._latest_detection: Optional[GreenBlobDetection] = None
+        self._latest_camera_info: Optional[CameraInfo] = None
         self._latest_cloud: Optional[PointCloud2] = None
 
         self._subscribe_image_topic(self._default_image_topic)
+        self._subscribe_camera_info_topic(self._default_camera_info_topic)
         self._subscribe_cloud_topic(self._default_cloud_topic)
         self._subscribe_usb_card_detections()
         self._server = actionlib.SimpleActionServer(
@@ -152,6 +161,7 @@ class EstimateHousingPlaneActionServer:
         cloud_topic = str(goal.cloud_topic).strip() or self._default_cloud_topic
         self._refresh_usb_card_selector()
         self._subscribe_image_topic(image_topic)
+        self._subscribe_camera_info_topic(self._default_camera_info_topic)
         self._subscribe_cloud_topic(cloud_topic)
         self._subscribe_usb_card_detections()
 
@@ -189,10 +199,20 @@ class EstimateHousingPlaneActionServer:
             cloud.width,
             cloud.height,
         )
+        roi_center_x = detection.roi_center_x if detection.roi_center_x is not None else detection.center_x
+        roi_center_y = detection.roi_center_y if detection.roi_center_y is not None else detection.center_y
+        raw_roi_u, raw_roi_v = self._rotated_to_raw_pixel(
+            roi_center_x,
+            roi_center_y,
+            detection.image_width,
+            detection.image_height,
+            cloud.width,
+            cloud.height,
+        )
         point_grid, roi_mask = self._collect_roi_points(
             cloud,
-            raw_u,
-            raw_v,
+            raw_roi_u,
+            raw_roi_v,
             roi_radius_px,
             roi_stride_px,
         )
@@ -333,6 +353,19 @@ class EstimateHousingPlaneActionServer:
             self._latest_detection = None
             self._image_subscriber = rospy.Subscriber(topic, Image, self._image_callback, queue_size=1)
 
+    def _subscribe_camera_info_topic(self, camera_info_topic: str) -> None:
+        topic = camera_info_topic.strip()
+        if not topic:
+            return
+        with self._lock:
+            if topic == self._camera_info_topic and self._camera_info_subscriber is not None:
+                return
+            if self._camera_info_subscriber is not None:
+                self._camera_info_subscriber.unregister()
+            self._camera_info_topic = topic
+            self._latest_camera_info = None
+            self._camera_info_subscriber = rospy.Subscriber(topic, CameraInfo, self._camera_info_callback, queue_size=1)
+
     def _subscribe_cloud_topic(self, cloud_topic: str) -> None:
         topic = cloud_topic.strip() or self._default_cloud_topic
         with self._lock:
@@ -364,6 +397,9 @@ class EstimateHousingPlaneActionServer:
         if not self._uses_usb_card_detector():
             return
         target = self._usb_card_selector.select_from_json(msg.data)
+        plane_target = self._usb_card_plane_selector.select_from_json(msg.data)
+        roi_center_x = plane_target.center_x if plane_target.found else None
+        roi_center_y = plane_target.center_y if plane_target.found else None
         detection = GreenBlobDetection(
             stamp=target.stamp,
             image_width=target.image_width,
@@ -371,11 +407,17 @@ class EstimateHousingPlaneActionServer:
             found=target.found,
             center_x=target.center_x,
             center_y=target.center_y,
+            roi_center_x=roi_center_x,
+            roi_center_y=roi_center_y,
             area=target.area,
             message=target.message,
         )
         with self._lock:
             self._latest_detection = detection
+
+    def _camera_info_callback(self, msg: CameraInfo) -> None:
+        with self._lock:
+            self._latest_camera_info = msg
 
     def _cloud_callback(self, msg: PointCloud2) -> None:
         with self._lock:
@@ -398,7 +440,9 @@ class EstimateHousingPlaneActionServer:
         if not self._uses_usb_card_detector():
             return
         next_selector = UsbCardTargetSelector.from_ros_params("housing_plane")
+        next_plane_selector = self._make_usb_card_plane_selector(next_selector)
         previous_selector = self._usb_card_selector
+        previous_plane_selector = self._usb_card_plane_selector
         changed = (
             previous_selector.target_card_index != next_selector.target_card_index
             or previous_selector.target_point != next_selector.target_point
@@ -408,22 +452,32 @@ class EstimateHousingPlaneActionServer:
             or previous_selector.expected_card_count != next_selector.expected_card_count
             or previous_selector.estimated_slot_requires_complete
             != next_selector.estimated_slot_requires_complete
+            or previous_plane_selector.target_point != next_plane_selector.target_point
+            or previous_plane_selector.require_connector != next_plane_selector.require_connector
         )
         if not changed:
             return
         with self._lock:
             self._usb_card_selector = next_selector
+            self._usb_card_plane_selector = next_plane_selector
             self._latest_detection = None
         rospy.loginfo(
-            "[usb_c_insertion] event=estimate_housing_plane_usb_card_selector_updated target_card_index=%d target_point=%s require_connector=%s order_axis=%s order_direction=%s expected_card_count=%d estimated_slot_requires_complete=%s",
+            "[usb_c_insertion] event=estimate_housing_plane_usb_card_selector_updated target_card_index=%d target_point=%s require_connector=%s plane_target_point=%s plane_require_connector=%s order_axis=%s order_direction=%s expected_card_count=%d estimated_slot_requires_complete=%s",
             next_selector.target_card_index,
             next_selector.target_point,
             str(next_selector.require_connector).lower(),
+            next_plane_selector.target_point,
+            str(next_plane_selector.require_connector).lower(),
             next_selector.order_axis,
             next_selector.order_direction,
             next_selector.expected_card_count,
             str(next_selector.estimated_slot_requires_complete).lower(),
         )
+
+    def _make_usb_card_plane_selector(self, target_selector: UsbCardTargetSelector) -> UsbCardTargetSelector:
+        target_point = str(get_param("~housing_plane/usb_card_plane_target_point", "card_center")).strip().lower()
+        require_connector = self._bool_param("~housing_plane/usb_card_plane_require_connector", False)
+        return target_selector.with_target(target_point or "card_center", require_connector)
 
     def _uses_usb_card_detector(self) -> bool:
         return self._detection_source in ("usb_card", "usb_card_detector", "card")
@@ -681,7 +735,11 @@ class EstimateHousingPlaneActionServer:
         raw_v: float,
         estimate: PlaneEstimate,
     ) -> Optional[np.ndarray]:
-        ray_point = self._read_marker_ray_point(cloud, raw_u, raw_v)
+        ray_point = None
+        if self._marker_ray_source in ("camera_info", "intrinsics", "camera"):
+            ray_point = self._camera_info_marker_ray(cloud, raw_u, raw_v)
+        if ray_point is None:
+            ray_point = self._read_marker_ray_point(cloud, raw_u, raw_v)
         if ray_point is None:
             return None
         ray_norm = float(np.linalg.norm(ray_point))
@@ -695,6 +753,50 @@ class EstimateHousingPlaneActionServer:
         if distance_along_ray <= 0.0:
             return None
         return direction * distance_along_ray
+
+    def _camera_info_marker_ray(self, cloud: PointCloud2, raw_u: float, raw_v: float) -> Optional[np.ndarray]:
+        with self._lock:
+            camera_info = self._latest_camera_info
+        if camera_info is None:
+            rospy.logwarn_throttle(
+                2.0,
+                "[usb_c_insertion] event=estimate_housing_plane_camera_info_unavailable fallback=cloud_ray",
+            )
+            return None
+
+        fx = float(camera_info.K[0]) if len(camera_info.K) >= 9 else 0.0
+        fy = float(camera_info.K[4]) if len(camera_info.K) >= 9 else 0.0
+        cx = float(camera_info.K[2]) if len(camera_info.K) >= 9 else 0.0
+        cy = float(camera_info.K[5]) if len(camera_info.K) >= 9 else 0.0
+        if fx <= 1e-9 or fy <= 1e-9:
+            fx = float(camera_info.P[0]) if len(camera_info.P) >= 12 else 0.0
+            fy = float(camera_info.P[5]) if len(camera_info.P) >= 12 else 0.0
+            cx = float(camera_info.P[2]) if len(camera_info.P) >= 12 else 0.0
+            cy = float(camera_info.P[6]) if len(camera_info.P) >= 12 else 0.0
+        if fx <= 1e-9 or fy <= 1e-9:
+            rospy.logwarn_throttle(
+                2.0,
+                "[usb_c_insertion] event=estimate_housing_plane_camera_info_invalid fallback=cloud_ray",
+            )
+            return None
+
+        info_width = float(camera_info.width or cloud.width)
+        info_height = float(camera_info.height or cloud.height)
+        cloud_width = max(1.0, float(cloud.width))
+        cloud_height = max(1.0, float(cloud.height))
+        u = float(raw_u) * info_width / cloud_width
+        v = float(raw_v) * info_height / cloud_height
+        ray = np.asarray(((u - cx) / fx, (v - cy) / fy, 1.0), dtype=np.float64)
+        if self._cloud_to_base_transform_rotation == "camera_frame_to_optical":
+            qx, qy, qz, qw = CAMERA_FRAME_TO_OPTICAL_QUATERNION
+            ray = np.asarray(
+                rotate_vector_by_quaternion(ray[0], ray[1], ray[2], -qx, -qy, -qz, qw),
+                dtype=np.float64,
+            )
+        norm = float(np.linalg.norm(ray))
+        if norm <= 1e-9:
+            return None
+        return ray / norm
 
     def _read_marker_ray_point(self, cloud: PointCloud2, raw_u: float, raw_v: float) -> Optional[np.ndarray]:
         center_u = int(round(raw_u))
@@ -795,6 +897,11 @@ class EstimateHousingPlaneActionServer:
             base_point, base_normal = self._transform_plane_to_base(cloud.header.frame_id, estimate.point, estimate.normal)
             result.plane_point_base = self._point_stamped(self._base_frame, base_point)
             result.plane_normal_base = self._vector3(base_normal)
+            if marker_plane_point is None:
+                rospy.logwarn(
+                    "[usb_c_insertion] event=estimate_housing_plane_marker_ray_unavailable "
+                    "fallback=plane_centroid",
+                )
             marker_point = marker_plane_point if marker_plane_point is not None else estimate.point
             marker_base_point, _ = self._transform_plane_to_base(cloud.header.frame_id, marker_point, estimate.normal)
             result.marker_plane_point = self._point_stamped(cloud.header.frame_id, marker_point)
@@ -941,6 +1048,19 @@ class EstimateHousingPlaneActionServer:
     @staticmethod
     def _goal_int_or_default(value: int, default: int) -> int:
         return int(value) if int(value) > 0 else int(default)
+
+    @staticmethod
+    def _bool_param(name: str, default: bool) -> bool:
+        value = get_param(name, default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in ("true", "1", "yes", "on"):
+                return True
+            if normalized in ("false", "0", "no", "off"):
+                return False
+        return bool(value)
 
     @staticmethod
     def _read_hsv_param(param_name: str) -> Tuple[int, int, int]:
