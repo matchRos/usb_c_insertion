@@ -94,6 +94,10 @@ class VerifyLoomingActionServer:
         self._frame_debug_output_dir = required_str_param("~looming/frame_debug_output_dir")
         self._frame_debug_rate_hz = max(0.1, required_float_param("~looming/frame_debug_rate_hz"))
         self._frame_debug_max_frames = max(0, required_int_param("~looming/frame_debug_max_frames"))
+        self._frame_debug_max_image_detection_dt = max(
+            0.0,
+            required_float_param("~looming/frame_debug_max_image_detection_dt"),
+        )
         self._detection_source = str(get_param("~looming/detection_source", "green_marker")).strip().lower()
         self._usb_card_detections_topic = str(
             get_param(
@@ -645,15 +649,36 @@ class VerifyLoomingActionServer:
         if self._frame_debug_count > 0 and (now - self._frame_debug_last_save).to_sec() < min_interval:
             return
 
+        image_stamp = rospy.Time(0)
         bgr = detection.bgr if detection is not None and detection.bgr is not None else None
         if bgr is None:
             with self._lock:
                 bgr = None if self._latest_bgr is None else self._latest_bgr.copy()
+                image_stamp = self._latest_bgr_stamp
         else:
             bgr = bgr.copy()
+            image_stamp = detection.stamp
         if bgr is None:
             rospy.loginfo_throttle(2.0, "[usb_c_insertion] event=verify_looming_frame_debug_skipped reason=missing_image")
             return
+        if (
+            detection is not None
+            and detection.found
+            and image_stamp != rospy.Time(0)
+            and detection.stamp != rospy.Time(0)
+        ):
+            image_detection_dt = abs((image_stamp - detection.stamp).to_sec())
+            if (
+                self._frame_debug_max_image_detection_dt > 0.0
+                and image_detection_dt > self._frame_debug_max_image_detection_dt
+            ):
+                rospy.loginfo_throttle(
+                    2.0,
+                    "[usb_c_insertion] event=verify_looming_frame_debug_skipped reason=image_detection_dt_too_large dt=%.3f max_dt=%.3f",
+                    image_detection_dt,
+                    self._frame_debug_max_image_detection_dt,
+                )
+                return
 
         mask = self._frame_debug_mask(bgr.shape[:2], detection)
         debug = bgr.copy()
@@ -663,11 +688,11 @@ class VerifyLoomingActionServer:
             debug = cv2.addWeighted(debug, 0.72, tint, 0.28, 0.0)
             contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             cv2.drawContours(debug, contours, -1, (255, 0, 255), 2)
-            self._put_label(debug, "Port mask", detection.center_x + 8.0, detection.center_y - 8.0, (255, 0, 255))
+            self._put_label(debug, "Port mask", 12.0, 22.0, (255, 0, 255))
 
         height, width = debug.shape[:2]
         self._draw_cross(debug, width * 0.5, height * 0.5, (255, 255, 0), 10, 2)
-        self._put_label(debug, "Image center", width * 0.5 + 10.0, height * 0.5 - 10.0, (255, 255, 0))
+        self._put_label(debug, "Image center", 12.0, 42.0, (255, 255, 0))
 
         self._frame_debug_count += 1
         self._frame_debug_last_save = now

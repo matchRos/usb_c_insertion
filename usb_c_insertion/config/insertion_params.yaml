@@ -116,6 +116,7 @@ looming:
   frame_debug_output_dir: "/tmp/usb_c_insertion_looming_frames"
   frame_debug_rate_hz: 5.0
   frame_debug_max_frames: 80
+  frame_debug_max_image_detection_dt: 0.08
 
 housing_plane:
   action_name: "estimate_housing_plane"
